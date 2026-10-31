@@ -55,7 +55,7 @@ fn fast_source(input: &[u8]) -> Result<(codec::Bitmap, Option<Vec<u8>>), Error> 
         let (pixels, width, height) = codec::oriented(photo.pixels, photo.width, photo.height, photo.orientation);
         return Ok((codec::Bitmap { pixels, width, height }, photo.icc.filter(|icc| !crate::jpeg::is_srgb(icc))));
     }
-    let chunks = crate::fast::checked_chunks(input)?;
+    let chunks = codec::checked_chunks(input)?;
     if chunks.iter().any(|(kind, _)| *kind == b"acTL") {
         return Err("animated PNGs can't be written as WebP yet".into());
     }

@@ -7,6 +7,40 @@ use miniz_oxide::deflate::compress_to_vec_zlib;
 
 pub type Error = Box<dyn std::error::Error>;
 
+/// PNG chunk type and complete encoded chunk, including length and checksum.
+type Chunk<'a> = (&'a [u8], &'a [u8]);
+
+/// Validate chunk framing and CRCs before reading headers or retaining encoded data.
+pub(crate) fn checked_chunks(input: &[u8]) -> Result<Vec<Chunk<'_>>, Error> {
+    if !input.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("invalid PNG signature".into());
+    }
+    let mut chunks = Vec::new();
+    let mut pos = 8usize;
+    let mut idat = false;
+    while input.len().saturating_sub(pos) >= 12 {
+        let size = u32::from_be_bytes(input[pos..pos + 4].try_into()?) as usize;
+        let end = pos.checked_add(size).and_then(|n| n.checked_add(12)).filter(|&n| n <= input.len()).ok_or("truncated PNG chunk")?;
+        let kind = &input[pos + 4..pos + 8];
+        if crc32fast::hash(&input[pos + 4..end - 4]) != u32::from_be_bytes(input[end - 4..end].try_into()?) {
+            return Err("invalid PNG checksum".into());
+        }
+        if (pos == 8 && (kind != b"IHDR" || size != 13)) || (pos != 8 && kind == b"IHDR") {
+            return Err("invalid PNG header".into());
+        }
+        if kind[0] & 0x20 == 0 && !matches!(kind, b"IHDR" | b"PLTE" | b"IDAT" | b"IEND") {
+            return Err("unknown critical PNG chunk".into());
+        }
+        chunks.push((kind, &input[pos..end]));
+        idat |= kind == b"IDAT";
+        if kind == b"IEND" {
+            return if size == 0 && end == input.len() && idat { Ok(chunks) } else { Err("invalid PNG end".into()) };
+        }
+        pos = end;
+    }
+    Err("incomplete PNG".into())
+}
+
 pub struct Bitmap {
     pub pixels: Vec<RGBA>,
     pub width: usize,
@@ -43,6 +77,7 @@ pub fn oriented(pixels: Vec<RGBA>, w: usize, h: usize, orientation: u16) -> (Vec
 /// Any PNG as 8-bit RGBA. Color-space chunks (gAMA, iCCP, ...) are ignored, as the benchmark does:
 /// the pixel values are scored as they are, and `compress` gives its output the same chunks.
 pub fn decode(bytes: &[u8]) -> Result<Bitmap, Error> {
+    checked_chunks(bytes)?;
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;

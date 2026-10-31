@@ -73,6 +73,25 @@ fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn png_decoders_reject_missing_or_corrupt_end_chunks() {
+    let still = sample(false);
+    let timing = luma::apng::Timing { delays: vec![(1, 10), (2, 10)], plays: 2, default_image: false };
+    let animation = luma::apng::encode(&[RGBA::new(0, 0, 0, 255), RGBA::new(255, 255, 255, 255)], &[0, 1], 1, 1, &timing);
+    assert!(codec::decode(&still).is_ok());
+    assert!(luma::apng::decode(&animation).is_ok());
+    for input in [&still, &animation] {
+        let mut corrupt = input.to_vec();
+        *corrupt.last_mut().unwrap() ^= 1;
+        for invalid in [&input[..input.len() - 1], &input[..input.len() - 12], corrupt.as_slice()] {
+            assert!(codec::decode(invalid).is_err(), "pixels alone do not make a complete PNG");
+            if luma::apng::is_animated(input) {
+                assert!(luma::apng::decode(invalid).is_err(), "animation must also validate IEND");
+            }
+        }
+    }
+}
+
+#[test]
 fn neither_png_preset_returns_an_unchanged_minimal_image() {
     let mut input = b"\x89PNG\r\n\x1a\n".to_vec();
     input.extend(png_chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0]));

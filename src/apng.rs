@@ -53,6 +53,7 @@ pub fn is_animated(png: &[u8]) -> bool {
 
 pub fn decode(bytes: &[u8]) -> Result<Animation, Error> {
     use png::{BlendOp, DisposeOp};
+    codec::checked_chunks(bytes)?;
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;

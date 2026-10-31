@@ -6,9 +6,6 @@ use crate::{codec, palette, remap};
 
 pub(crate) const MAX_PIXELS: usize = 8_000_000;
 
-/// PNG chunk type and complete encoded chunk, including length and checksum.
-type Chunk<'a> = (&'a [u8], &'a [u8]);
-
 pub struct FastCompressed {
     pub png: Vec<u8>,
     pub outcome: &'static str,
@@ -33,7 +30,7 @@ impl FastCompressed {
 /// Reject animation, images above the pixel limit and results that do not reduce size.
 pub fn compress_fast(input: &[u8]) -> Result<FastCompressed, codec::Error> {
     let started = Instant::now();
-    let chunks = checked_chunks(input)?;
+    let chunks = codec::checked_chunks(input)?;
     let finish = |png, outcome, colors| FastCompressed { png, outcome, colors, elapsed_ms: started.elapsed().as_millis() };
     if chunks.iter().any(|(kind, _)| *kind == b"acTL") {
         return Err("fast PNG does not support animation; use the quality preset for APNG".into());
@@ -78,37 +75,6 @@ pub fn compress_fast(input: &[u8]) -> Result<FastCompressed, codec::Error> {
     let (png, outcome) = if candidate.len() < stripped.len() { (candidate, outcome) } else { (stripped, "metadata_only") };
     crate::require_smaller(input, &png)?;
     Ok(finish(png, outcome, palette.len()))
-}
-
-/// Validate chunk framing and CRCs before reading headers or retaining encoded data.
-pub(crate) fn checked_chunks(input: &[u8]) -> Result<Vec<Chunk<'_>>, codec::Error> {
-    if !input.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Err("invalid PNG signature".into());
-    }
-    let mut chunks = Vec::new();
-    let mut pos = 8usize;
-    let mut idat = false;
-    while input.len().saturating_sub(pos) >= 12 {
-        let size = u32::from_be_bytes(input[pos..pos + 4].try_into()?) as usize;
-        let end = pos.checked_add(size).and_then(|n| n.checked_add(12)).filter(|&n| n <= input.len()).ok_or("truncated PNG chunk")?;
-        let kind = &input[pos + 4..pos + 8];
-        if crc32fast::hash(&input[pos + 4..end - 4]) != u32::from_be_bytes(input[end - 4..end].try_into()?) {
-            return Err("invalid PNG checksum".into());
-        }
-        if (pos == 8 && (kind != b"IHDR" || size != 13)) || (pos != 8 && kind == b"IHDR") {
-            return Err("invalid PNG header".into());
-        }
-        if kind[0] & 0x20 == 0 && !matches!(kind, b"IHDR" | b"PLTE" | b"IDAT" | b"IEND") {
-            return Err("unknown critical PNG chunk".into());
-        }
-        chunks.push((kind, &input[pos..end]));
-        idat |= kind == b"IDAT";
-        if kind == b"IEND" {
-            return if size == 0 && end == input.len() && idat { Ok(chunks) } else { Err("invalid PNG end".into()) };
-        }
-        pos = end;
-    }
-    Err("incomplete PNG".into())
 }
 
 pub(crate) fn exif_orientation(exif: &[u8]) -> Result<Option<u16>, codec::Error> {
