@@ -4,7 +4,7 @@ This repository starts from the [heydeer/pngdeer](https://github.com/heydeer/png
 
 The **Windows release** GitHub Actions workflow builds `pngdeer.exe` on `windows-2022` with `parallel,oxipng,webp,jpeg-decode` enabled: PNG compression, PNG/JPEG to WebP, and JPEG decoding for scoring. JPEG output (mozjpeg) is disabled in this artifact. It only builds and packages the executable; it does not run tests, Clippy, benchmarks, or the executable. Download **pngdeer-windows-x64** from the workflow run's **Artifacts** section; the archive contains the executable, licenses, source commit, and SHA-256 checksum. Artifacts are retained for 30 days, and the workflow can be started manually.
 
-The original search preset (`--preset quality`) remains the default. An explicit `--preset fast` selects the fast preset below; both presets support `-` for binary PNG stdin/stdout. Reports go to stderr when the output is `-`, and to stdout for file output.
+The original search preset (`--preset quality`) remains the default. An explicit `--preset fast` selects the fast preset below; both presets support `-` for binary stdin/stdout, with `--format webp` selecting WebP output. Reports go to stderr when the output is `-`, and to stdout for file output.
 
 ## Compression presets
 
@@ -14,7 +14,7 @@ pngdeer input.png -o output.png --preset fast
 pngdeer - -o - --preset fast
 ```
 
-The fast preset builds one full-resolution palette of at most 256 colors with the existing plain quantizer (five refinement rounds, no feedback pass), then remaps once with 50% dithering. Images already fitting in 256 colors use an exact palette. It does not search palette sizes, score perceptual quality, or run the final oxipng pass. PNG row-filter encoding still uses the existing writer. Its report includes `score: null`; there is no claim of perceptual or model-recognition equivalence. Search, scoring, upscaling and non-PNG format options are rejected with this preset.
+The fast preset builds one full-resolution palette of at most 256 colors with the existing plain quantizer (five refinement rounds, no feedback pass), then remaps once with 50% dithering. Images already fitting in 256 colors use an exact palette. It does not search palette sizes, score perceptual quality, or run the final oxipng pass. PNG row-filter encoding still uses the existing writer. Its report includes `score: null`; there is no claim of perceptual or model-recognition equivalence. Search, scoring, upscaling and WebP tuning options are rejected with this preset. PNG output uses this palette path; WebP output uses the single-encode path below.
 
 Comments, timestamps, density and unrelated metadata are removed. Color information needed for display is retained using the existing color-chunk handling; EXIF is reduced to non-default orientation only. Pixels are not rotated or resized, and transparency is retained. Invalid EXIF produces an error instead of guessing orientation. The smaller of the candidate and metadata-stripped input is selected; if neither is smaller than the input, the original bytes are returned.
 
@@ -30,19 +30,23 @@ This checks bundled images, binary stdin/stdout, output dimensions and CRCs, tra
 
 ## Windows WebP output
 
-WebP uses the existing quality search; it is opt-in and is not part of the fast preset. PNG input supports PNG or WebP output. JPEG input supports WebP output in the Windows artifact; use an explicit format for pipes. JPEG EXIF orientation is applied to pixels, and non-sRGB ICC profiles are retained. WebP conversion can produce a larger file; callers must compare sizes and keep the original when appropriate. Animated PNGs and unsupported color descriptions produce errors rather than losing those properties.
+WebP is opt-in. The quality preset uses the existing search; the fast preset encodes the source pixels once, without PNG palette search or perceptual scoring. PNG input supports PNG or WebP output. JPEG input supports WebP output in the Windows artifact; use an explicit format for pipes. JPEG EXIF orientation is applied to pixels, and non-sRGB ICC profiles are retained. WebP conversion can produce a larger file; callers must compare sizes and keep the original when appropriate. Animated PNGs and unsupported color descriptions produce errors rather than losing those properties.
 
 ```sh
 pngdeer input.png -o output.webp --preset quality
+pngdeer input.png -o output.webp --preset fast
 pngdeer photo.jpg -o output.webp
 pngdeer - -o - --format webp
 ```
 
-The new WebP Windows build awaits CI and downloaded-executable verification. Run its checks locally after downloading (Pillow independently decodes outputs and creates JPEG fixtures from bundled images):
+The quality WebP artifact from commit b60d338 passed executable checks. The new fast WebP path awaits CI and executable verification. Run its checks locally after downloading (Pillow independently decodes outputs and creates JPEG fixtures from bundled images):
 
 ```sh
 uv run --with pillow python scripts/verify-webp.py --exe path/to/pngdeer.exe --output dist/webp-check
+uv run --with pillow python scripts/verify-webp.py --exe path/to/pngdeer.exe --output dist/webp-fast-check --preset fast
 ```
+
+Fast WebP starts at fixed quality 80 and method 3, with sharp YUV and lossless alpha. These are initial settings to measure, not an AI recognition guarantee. The report uses `score: null`. PNG and JPEG EXIF orientation is applied to pixels; unrelated metadata is removed and necessary ICC information is retained. Animated PNGs, malformed PNG EXIF, images above 8 million pixels, and color descriptions that WebP cannot represent are rejected. Pixel limits are checked before allocating decoded pixel buffers. It always returns WebP even if larger than the input; the caller must compare sizes and handle failures. The existing libwebp wrapper still performs its small, once-per-process initialization encodes before encoding the source image.
 
 The rondo gateway currently accepts PNG compressor output only; WebP must not be configured there until its output validation and MIME handling are updated.
 
