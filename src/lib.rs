@@ -19,6 +19,7 @@
 pub mod apng;
 pub mod codec;
 mod color;
+mod fast;
 #[cfg(feature = "jpeg")]
 pub mod jpeg;
 mod palette;
@@ -31,6 +32,7 @@ pub mod search;
 pub mod webp;
 
 use codec::Error;
+pub use fast::{compress_fast, FastCompressed};
 #[cfg(feature = "jpeg")]
 pub use jpeg::{compress_jpeg, CompressedJpeg};
 use search::{Report, Variant, DEFAULT_VARIANTS};
