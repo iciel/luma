@@ -6,6 +6,9 @@ use crate::{codec, palette, remap};
 
 pub(crate) const MAX_PIXELS: usize = 8_000_000;
 
+/// PNG chunk type and complete encoded chunk, including length and checksum.
+type Chunk<'a> = (&'a [u8], &'a [u8]);
+
 pub struct FastCompressed {
     pub png: Vec<u8>,
     pub outcome: &'static str,
@@ -78,7 +81,7 @@ pub fn compress_fast(input: &[u8]) -> Result<FastCompressed, codec::Error> {
 }
 
 /// Validate chunk framing and CRCs before reading headers or retaining encoded data.
-pub(crate) fn checked_chunks(input: &[u8]) -> Result<Vec<(&[u8], &[u8])>, codec::Error> {
+pub(crate) fn checked_chunks(input: &[u8]) -> Result<Vec<Chunk<'_>>, codec::Error> {
     if !input.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("invalid PNG signature".into());
     }
@@ -133,7 +136,7 @@ pub(crate) fn exif_orientation(exif: &[u8]) -> Result<Option<u16>, codec::Error>
     let directory = exif.get(offset..).filter(|d| d.len() >= 2).ok_or("invalid EXIF directory")?;
     let count = short(&directory[..2]) as usize;
     let entries = directory.get(2..2 + count * 12).ok_or("truncated EXIF directory")?;
-    for entry in entries.chunks_exact(12) {
+    for entry in entries.as_chunks::<12>().0 {
         if short(&entry[..2]) == 0x112 {
             let orientation = short(&entry[8..10]);
             if short(&entry[2..4]) != 3 || long(&entry[4..8]) != 1 || !(1..=8).contains(&orientation) {

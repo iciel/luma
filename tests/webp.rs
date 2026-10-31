@@ -155,7 +155,7 @@ fn refuses_what_webp_cant_show() {
 fn both_webp_presets_reject_size_growth_including_metadata() {
     let profile = vec![42u8; 4096];
     let iccp = [&b"profile\0\0"[..], &miniz_oxide::deflate::compress_to_vec_zlib(&profile, 6)].concat();
-    let input = codec::with_chunks(&png(&vec![RGBA::new(255, 0, 0, 255); 96 * 80]), &png_chunk(b"iCCP", &iccp));
+    let input = codec::with_chunks(&png(&[RGBA::new(255, 0, 0, 255); 96 * 80]), &png_chunk(b"iCCP", &iccp));
     assert!(input.len() < profile.len());
     let quality = compress_webp(&input, &Settings::default()).err().expect("quality must reject larger output");
     let fast = luma::compress_webp_fast(&input).err().expect("fast must reject larger output");
