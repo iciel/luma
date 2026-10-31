@@ -1,7 +1,7 @@
-//! End-to-end checks of pngdeer::compress_webp on small synthetic images.
+//! End-to-end checks of luma::compress_webp on small synthetic images.
 #![cfg(feature = "webp")]
 
-use pngdeer::{codec, compress_webp, search, webp, Settings, RGBA};
+use luma::{codec, compress_webp, search, webp, Settings, RGBA};
 
 /// A 96×80 test image: smooth gradients with a little noise (where lossy WebP wins), and optionally
 /// a translucent disc.

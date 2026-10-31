@@ -1,6 +1,6 @@
-//! End-to-end checks of pngdeer::compress on small synthetic images.
+//! End-to-end checks of luma::compress on small synthetic images.
 
-use pngdeer::{codec, compress, search, Settings, RGBA};
+use luma::{codec, compress, search, Settings, RGBA};
 
 /// A 96×80 test image: flat colored blocks with fine noise (which costs a lossless PNG dearly and a
 /// palette little) and, optionally, a translucent disc.

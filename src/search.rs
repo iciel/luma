@@ -190,7 +190,7 @@ pub struct Profile {
     pub remap: f64,
     pub score: f64,
     pub encode: f64,
-    /// oxipng on the final file (pngdeer::compress).
+    /// oxipng on the final file (luma::compress).
     pub optimize: f64,
 }
 

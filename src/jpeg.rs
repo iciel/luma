@@ -41,7 +41,7 @@ pub(crate) fn decode_limited(bytes: &[u8], max_pixels: usize) -> Result<Photo, E
     let options = DecoderOptions::default().set_max_width(65_500).set_max_height(65_500);
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
     decoder.decode_headers().map_err(unreadable)?;
-    let (width, height) = decoder.dimensions().ok_or("not a JPEG pngdeer can read")?;
+    let (width, height) = decoder.dimensions().ok_or("not a JPEG Luma can read")?;
     if width.checked_mul(height).is_none_or(|pixels| pixels > max_pixels) {
         return Err("JPEG exceeds the pixel limit".into());
     }
@@ -56,7 +56,7 @@ pub(crate) fn decode_limited(bytes: &[u8], max_pixels: usize) -> Result<Photo, E
     let options = decoder.options().jpeg_set_out_colorspace(if gray { ColorSpace::Luma } else { ColorSpace::RGB });
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
     let samples = decoder.decode().map_err(unreadable)?;
-    let (width, height) = decoder.dimensions().ok_or("not a JPEG pngdeer can read")?;
+    let (width, height) = decoder.dimensions().ok_or("not a JPEG Luma can read")?;
     let pixels = if gray {
         samples.iter().map(|&g| RGBA::new(g, g, g, 255)).collect()
     } else {
@@ -66,7 +66,7 @@ pub(crate) fn decode_limited(bytes: &[u8], max_pixels: usize) -> Result<Photo, E
 }
 
 fn unreadable(e: zune_jpeg::errors::DecodeErrors) -> Error {
-    format!("not a JPEG pngdeer can read: {}", e.to_string().trim()).into()
+    format!("not a JPEG Luma can read: {}", e.to_string().trim()).into()
 }
 
 /// The orientation tag (0x0112) in IFD0 of EXIF data starting at its TIFF header.

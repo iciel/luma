@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect licenses for the dependencies shipped in a native pngdeer release."""
+"""Collect licenses for the dependencies shipped in a native Luma release."""
 
 import argparse
 import json
@@ -43,7 +43,7 @@ def main() -> None:
     packages = {p["id"]: p for p in meta["packages"]}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
     # Select only the CLI's release features and runtime dependencies.
-    tree = cargo("tree", "--locked", "--package", "pngdeer", "--target", args.target,
+    tree = cargo("tree", "--locked", "--package", "luma", "--target", args.target,
                  "--edges", "normal,no-proc-macro", "--prefix", "none", "--format", "{p}", "--color", "never", *features)
     active = {(line.split()[0], line.split()[1].removeprefix("v")) for line in tree.splitlines() if line.strip()}
     key = lambda p: (p["name"], p["version"])
@@ -60,7 +60,7 @@ def main() -> None:
 
     texts: dict[str, tuple[str, list[str]]] = {}
     unfiled = []
-    dependencies = sorted((packages[i] for i in seen if packages[i]["name"] != "pngdeer"), key=key)
+    dependencies = sorted((packages[i] for i in seen if packages[i]["name"] != "luma"), key=key)
     for package in dependencies:
         label = f"{package['name']} {package['version']} ({package.get('license') or 'see its source'})"
         files = license_files(package)
@@ -76,7 +76,7 @@ def main() -> None:
             if label not in labels:
                 labels.append(label)
 
-    parts = [f"Third-party software compiled into pngdeer's native CLI ({args.target}), and its licenses.",
+    parts = [f"Third-party software compiled into Luma's native CLI ({args.target}), and its licenses.",
              "Each license text below is preceded by the crates it covers.", ""]
     for text, labels in sorted(texts.values(), key=lambda item: item[1][0]):
         parts += ["=" * 78, *labels, "-" * 78, text, ""]

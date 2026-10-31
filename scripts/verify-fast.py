@@ -92,6 +92,19 @@ def main():
         assert result.returncode != 0 and not result.stdout and result.stderr
     result = subprocess.run(command + ["--target", "90"], input=data, capture_output=True, timeout=10, check=False)
     assert result.returncode != 0 and not result.stdout
+    # The retained quality preset must still produce decodable PNG and a scored report.
+    sample = (ROOT / "bench/images/photos/kodim03.png").read_bytes()
+    result = subprocess.run([str(exe), "-", "-o", "-", "--preset", "quality"],
+                            input=sample, capture_output=True, timeout=180, check=True)
+    report = json.loads(result.stderr)
+    assert report["score"] is not None and report["bytes"] == len(result.stdout)
+    assert chunks(result.stdout)[0][1][:8] == chunks(sample)[0][1][:8]
+    assert len(result.stdout) <= len(sample)
+    (args.output / "quality-kodim03.png").write_bytes(result.stdout)
+    for bad_target in ("nan", "inf", "-1", "101"):
+        result = subprocess.run([str(exe), "-", "-o", "-", "--target", bad_target],
+                                input=sample, capture_output=True, timeout=10)
+        assert result.returncode != 0 and not result.stdout
     summary = {"exe_sha256": hashlib.sha256(exe.read_bytes()).hexdigest(), "rows": rows, "checks_passed": True}
     (args.output / "results.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

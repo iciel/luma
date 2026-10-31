@@ -1,166 +1,56 @@
-# pngdeer
+# Luma
 
-This repository starts from the [heydeer/pngdeer](https://github.com/heydeer/pngdeer) 0.2.1 source snapshot and adds a Windows x64 build.
+本地图片压缩工具，支持 PNG → PNG/WebP、JPEG → WebP。图片不会上传到网络。
 
-The **Windows release** GitHub Actions workflow builds `pngdeer.exe` on `windows-2022` with `parallel,oxipng,webp,jpeg-decode` enabled: PNG compression, PNG/JPEG to WebP, and JPEG decoding for scoring. JPEG output (mozjpeg) is disabled in this artifact. It only builds and packages the executable; it does not run tests, Clippy, benchmarks, or the executable. Download **pngdeer-windows-x64** from the workflow run's **Artifacts** section; the archive contains the executable, licenses, source commit, and SHA-256 checksum. Artifacts are retained for 30 days, and the workflow can be started manually.
+| 预设 | 适合什么情况 | 工作方式 |
+|---|---|---|
+| `quality`（默认） | 更在意压缩效果，可以等待 | 搜索多个候选并计算感知质量评分 |
+| `fast` | 希望尽快完成 | PNG 生成一次调色板；WebP 按质量 80、method 3 编码一次 |
 
-The original search preset (`--preset quality`) remains the default. An explicit `--preset fast` selects the fast preset below; both presets support `-` for binary stdin/stdout, with `--format webp` selecting WebP output. Reports go to stderr when the output is `-`, and to stdout for file output.
+## 下载
 
-## Compression presets
+在 [Windows release](https://github.com/iciel/luma/actions/workflows/windows.yml) 成功运行的 **Artifacts** 中下载 `luma-windows-x64`，解压后使用 `luma.exe`。压缩包包含许可证、源提交信息和 SHA-256 校验值。可将程序所在目录加入 PATH。
 
-```sh
-pngdeer input.png -o output.png --preset quality
-pngdeer input.png -o output.png --preset fast
-pngdeer - -o - --preset fast
-```
-
-The fast preset builds one full-resolution palette of at most 256 colors with the existing plain quantizer (five refinement rounds, no feedback pass), then remaps once with 50% dithering. Images already fitting in 256 colors use an exact palette. It does not search palette sizes, score perceptual quality, or run the final oxipng pass. PNG row-filter encoding still uses the existing writer. Its report includes `score: null`; there is no claim of perceptual or model-recognition equivalence. Search, scoring, upscaling and WebP tuning options are rejected with this preset. PNG output uses this palette path; WebP output uses the single-encode path below.
-
-Comments, timestamps, density and unrelated metadata are removed. Color information needed for display is retained using the existing color-chunk handling; EXIF is reduced to non-default orientation only. Pixels are not rotated or resized, and transparency is retained. Invalid EXIF produces an error instead of guessing orientation. The smaller of the candidate and metadata-stripped input is selected; if neither is smaller than the input, the original bytes are returned.
-
-Animated PNGs and images above 8 million pixels are passed through with an explicit outcome, avoiding frame loss and large quantization buffers. Chunk framing and CRCs are checked even on passthrough; regular images are also decoded before processing. Stdin is capped at 64 MiB. There is no built-in wall-clock deadline: the invoking gateway must enforce its own process budget and fall back to the original on failure. Rondo's existing 5-second budget must be adjusted separately before adopting this preset.
-
-After downloading a new Windows artifact, run the executable checks separately from CI:
+## 使用
 
 ```sh
-python scripts/verify-fast.py --exe path/to/pngdeer.exe --output dist/fast-check
+luma input.png -o output.png
+luma input.png -o output.png --preset fast
+luma input.png -o output.webp --preset fast
+luma photo.jpg -o output.webp --preset quality
+luma input.png -o output.png --target 85
+luma --help
 ```
 
-This checks bundled images, binary stdin/stdout, output dimensions and CRCs, transparency, metadata, Chinese/spaced paths, invalid input, and preserved source files. It records timings and sizes; it does not compile Rust or establish AI recognition accuracy. The checks passed on the Windows artifact from commit 4d54ece. Bundled bicycle/photo/transparent-teacup images took 0.187/0.202/0.625 seconds and shrank by 68.0%/66.4%/56.4% in one local run; these are measurements, not latency guarantees.
+输出名以 `.webp` 结尾时自动选择 WebP，也可以用 `--format png|webp` 明确指定。`--target` 仅用于 `quality`，是感知评分目标，不是编码器质量百分比；无法达到时可能返回最接近的结果，请检查 JSON 报告。
 
-## Windows WebP output
-
-WebP is opt-in. The quality preset uses the existing search; the fast preset encodes the source pixels once, without PNG palette search or perceptual scoring. PNG input supports PNG or WebP output. JPEG input supports WebP output in the Windows artifact; use an explicit format for pipes. JPEG EXIF orientation is applied to pixels, and non-sRGB ICC profiles are retained. WebP conversion can produce a larger file; callers must compare sizes and keep the original when appropriate. Animated PNGs and unsupported color descriptions produce errors rather than losing those properties.
+支持管道：
 
 ```sh
-pngdeer input.png -o output.webp --preset quality
-pngdeer input.png -o output.webp --preset fast
-pngdeer photo.jpg -o output.webp
-pngdeer - -o - --format webp
+luma - -o - --preset fast --format webp
 ```
 
-The quality WebP artifact from commit b60d338 passed executable checks. The new fast WebP path awaits CI and executable verification. Run its checks locally after downloading (Pillow independently decodes outputs and creates JPEG fixtures from bundled images):
+`-` 表示标准输入或输出。图片输出到 stdout 时，JSON 报告写到 stderr；输出到文件时，报告写到 stdout。失败返回非零退出码。
+
+## 注意事项
+
+- 压缩可能有损，不能保证小字或 AI 识别效果不变；`fast` 不评分，报告中的 `score` 为 `null`。
+- PNG 输出不会比原始文件大，必要时返回原图；WebP 转换可能变大，需要调用方比较体积。
+- 保留必要色彩信息。快速 PNG 清理无关元数据并保留方向；WebP 转换会应用 JPEG 方向，快速 WebP 也会应用 PNG 方向。
+- `quality` 支持 APNG → APNG；快速 PNG 遇到动画或超过 800 万像素时返回原图。WebP 不接受动画，快速 WebP 也不接受超过 800 万像素的输入。
+- 不提供 JPEG 编码。部分色彩配置无法转换成 WebP，会明确报错。
+- stdin 上限 64 MiB。工具没有总耗时限制，调用方可设置进程超时。
+
+## 开发验证
+
+Windows CI 只构建 release 并打包，不运行测试或 Clippy。本地源码检查使用 `cargo fmt --check`；下载程序后执行：
 
 ```sh
-uv run --with pillow python scripts/verify-webp.py --exe path/to/pngdeer.exe --output dist/webp-check
-uv run --with pillow python scripts/verify-webp.py --exe path/to/pngdeer.exe --output dist/webp-fast-check --preset fast
+python scripts/verify-fast.py --exe path/to/luma.exe --output dist/png-check
+uv run --with pillow python scripts/verify-webp.py --exe path/to/luma.exe --output dist/webp-fast-check --preset fast
+uv run --with pillow python scripts/verify-webp.py --exe path/to/luma.exe --output dist/webp-quality-check --preset quality
 ```
 
-Fast WebP starts at fixed quality 80 and method 3, with sharp YUV and lossless alpha. These are initial settings to measure, not an AI recognition guarantee. The report uses `score: null`. PNG and JPEG EXIF orientation is applied to pixels; unrelated metadata is removed and necessary ICC information is retained. Animated PNGs, malformed PNG EXIF, images above 8 million pixels, and color descriptions that WebP cannot represent are rejected. Pixel limits are checked before allocating decoded pixel buffers. It always returns WebP even if larger than the input; the caller must compare sizes and handle failures. The existing libwebp wrapper still performs its small, once-per-process initialization encodes before encoding the source image.
+## 来源与许可
 
-The rondo gateway currently accepts PNG compressor output only; WebP must not be configured there until its output validation and MIME handling are updated.
-
-**Smaller PNGs. Same picture.** pngdeer is a lossy PNG compressor with no quality slider: for each image it searches palette sizes from 2 to 256 colors, with and without dithering, scores each result with a perceptual metric, and keeps the smallest file that still looks right. At the same quality, the median image comes out **8–12% smaller than with TinyPNG**, the best result of any open-source compressor we've measured.
-
-**[Try it in your browser →](https://heydeer.ai/open-source/pngdeer)** Nothing is uploaded: images are compressed on your device.
-
-[![pngdeer in the browser](.github/pngdeer.png)](https://heydeer.ai/open-source/pngdeer)
-
-```bash
-brew install heydeer/tap/pngdeer
-pngdeer input.png -o output.png
-```
-
-- **Picks the quality for you**: about what TinyPNG would give the image, never above 90 on SSIMULACRA2's scale, which is indistinguishable at 1:1.
-- **Same bytes everywhere**: the command line (macOS and Linux) and the browser (WebAssembly, on every core) run the same Rust code and write identical files.
-- **Big images too**: up to 40 megapixels in the browser, more on the command line.
-- **JPEG photos too**: re-encoded with mozjpeg at the lowest quality that keeps the target, 13% smaller in total than TinyPNG's at its quality ([details](#jpeg)).
-- **Animated PNGs stay animated**: every frame on one palette and at the target quality, timing kept; 28% of the original size on 12 animated emoji, about even to 16% smaller than TinyPNG ([notes](experiments/apng/FINDINGS.md)).
-- **Free and open source**: MIT.
-
-## Leaderboard
-
-We ran pngdeer, TinyPNG and eight open-source quantizers on 180 PNGs: icons, UI screenshots, illustrations, photos, cut-outs and 3D renders. Every output was scored against its original with [SSIMULACRA2](https://github.com/cloudinary/ssimulacra2), a perceptual metric where 90 means indistinguishable at 1:1. TinyPNG is the yardstick:
-
-- **Points**: median SSIMULACRA2 points above (+) or below (−) TinyPNG when a tool's file is as big as TinyPNG's.
-- **Reaches**: images where a tool can match TinyPNG's quality at all.
-
-Each cell gives the held-out set (71 images) / the tuning set (109 images):
-
-| Compressor | Points | Reaches |
-|---|---:|---:|
-| **pngdeer** | **+1.7 / +2.0** | **67 / 106** |
-| TinyPNG (the yardstick) | 0 | 71 / 109 |
-| pngquant | 0.0 / +0.3 | 53 / 87 |
-| quantizr | −0.1 / −1.0 | 39 / 53 |
-| exoquant | −3.7 / −5.1 | 19 / 24 |
-| NeuQuant | −6.5 / −9.8 | 4 / 5 |
-| FFmpeg | −7.0 / −8.8 | 16 / 15 |
-| quantette | −7.6 / −9.6 | 18 / 21 |
-| ImageMagick | −11.3 / −14.5 | 3 / 8 |
-| Pillow | −16.8 / −19.5 | 4 / 4 |
-
-At TinyPNG's quality, pngdeer's files are 12% smaller on the held-out set and 8% smaller on the tuning set (median image).
-
-- **Held out**: pngdeer's parameters were tuned on the 109 images; the other 71 were collected afterwards and never used for tuning.
-- **Generous to the others**: each open-source tool gets its best of ten settings per image, picked after the fact. pngdeer's results are what you get, searched at compression time.
-- **A second opinion**: scored with butteraugli instead, which the search never looks at, pngdeer's files are still 6–9% smaller than TinyPNG's at the same quality.
-- TinyPNG ran through its API in October 2026. [bench/](bench/) reruns everything; the website screenshots in the sets aren't ours to share, so a rerun covers 155 of the 180 images.
-
-### WebP
-
-pngdeer also writes WebP (an output name ending in `.webp`, or the switch in the browser): the smaller of its palette image stored losslessly and the lowest lossy quality that keeps the target (a JPEG photo: [below](#jpeg)). Against TinyPNG's WebP on 120 of the images, the size each tool needs to match TinyPNG's quality (median image / in total), and how many images it can bring up to that quality:
-
-| Compressor | Size at TinyPNG's quality | Reaches |
-|---|---:|---:|
-| **pngdeer** | **95.0% / 93.9%** | **118** |
-| TinyPNG (the yardstick) | 100% | 120 |
-| cwebp, best of 27 settings | 97.9% / 110.2% | 120 |
-| pngquant + cwebp, best of 10 | 135.0% / 212.1% | 115 |
-
-- **cwebp** is libwebp's own encoder, the library Squoosh, sharp and Pillow encode with. It gets its best of 27 settings per image, picked after the fact: 13 qualities with and without the auto filter, and lossless. **pngquant + cwebp** stores pngquant's palette image as lossless WebP, TinyPNG's palette route from open-source parts.
-- At TinyPNG's file size, on the 40 images where all three can be compared, pngdeer scores 2.6 SSIMULACRA2 points above TinyPNG, pngquant + cwebp 1.9, cwebp −0.3.
-- Out of the box, cwebp's default quality makes files 6% bigger than TinyPNG's on the median image, and slightly worse. pngdeer's automatic quality makes them 5% smaller, as good.
-- WebP's settings were chosen on these 120 images. On the other 60, against a stand-in that matches TinyPNG's WebP on these (same size and score, median), pngdeer is 4% smaller. The [WebP notes](experiments/webp/FINDINGS.md) have the details.
-
-### JPEG
-
-pngdeer also takes JPEG photos (`pngdeer photo.jpg -o smaller.jpg`, or drop them in the browser) and writes a smaller JPEG: re-encoded with mozjpeg at the lowest quality that keeps the target, never bigger than the photo. On 60 photos from Wikimedia Commons, 30 web-size copies and 30 camera originals, the size each tool needs to match TinyPNG's quality (median photo / in total), and how many photos it can bring up to that quality:
-
-| Compressor | Size at TinyPNG's quality | Reaches |
-|---|---:|---:|
-| **pngdeer** | **87.8% / 85.4%** | **60** |
-| TinyPNG (the yardstick) | 100% | 60 |
-| jpegli, best of 12 settings | 89.2% / 87.2% | 60 |
-| mozjpeg, best of 7 qualities | 94.2% / 89.1% | 59 |
-
-- **jpegli** is Google's JPEG encoder from the JPEG XL project, **mozjpeg** Mozilla's, which Squoosh uses. Each gets its best setting per photo, picked after the fact: qualities 40–90, jpegli also at 4:2:0. pngdeer's files are pooled the same way (its encoder, mozjpeg with its MS-SSIM-tuned table at 4:2:0, at qualities 50–85, and its own runs), as in the PNG and WebP tables. The file it writes with TinyPNG's score as the target is 89.5% / 86.7% of TinyPNG's size.
-- At TinyPNG's file size, pngdeer scores 3.3 SSIMULACRA2 points above TinyPNG on the median photo, jpegli 3.1, mozjpeg 1.8.
-- At its automatic quality, pngdeer's files are 82% of TinyPNG's size on the median photo (84% in total), scoring about the same (median +0.2 points). mozjpeg's default quality makes them 7% bigger than TinyPNG's, 5 points better.
-- Like TinyPNG, pngdeer gives big photos a lower quality than small ones: a large photo is seen scaled down. Unlike TinyPNG, it keeps the color profile (unless sRGB) and the orientation, and drops the rest of the camera's metadata.
-- **WebP from a JPEG** (`pngdeer photo.jpg -o photo.webp`, or the switch in the browser): turned upright, at the same automatic quality. At TinyPNG's WebP quality it needs 95.3% / 91.3% of TinyPNG's WebP size; cwebp, given its best of 13 settings per photo, about the same. At equal quality it is no smaller than pngdeer's own JPEG (99% on the median photo), so it is there for sites that want WebP.
-- The [JPEG notes](experiments/jpeg/FINDINGS.md) have the details. TinyPNG ran through its API in October 2026.
-
-## How it works
-
-- **Searches the palette**: palette sizes from 2 to 256 colors, each tried a few ways (with and without Floyd–Steinberg dithering, with neighbour smoothing, with a second palette builder), and the smallest file that reaches the target wins.
-- **Scores what you'd see**: SSIMULACRA2, measured in-process. Colors are matched in Oklab, smooth gradients are always dithered, and transparent pixels are judged over light and dark backgrounds.
-- **Stays fast on big images**: large images are searched on a downscaled preview and checked at full size.
-
-The [research notes](experiments/palette-feedback/FINDINGS.md) follow every step, from the first comparison with TinyPNG to today's defaults.
-
-## Command line
-
-```bash
-pngdeer input.png -o output.png              # automatic quality
-pngdeer input.png -o output.png --target 85  # a fixed SSIMULACRA2 quality
-pngdeer input.png -o output.webp             # WebP, automatic quality
-pngdeer photo.jpg -o photo.min.jpg           # JPEG, automatic quality
-pngdeer photo.jpg -o photo.webp              # a JPEG as WebP
-pngdeer --help
-```
-
-From source: `cargo build --release`, and the binary is `target/release/pngdeer`.
-
-## Browser
-
-The [web app](web/) runs the same code compiled to WebAssembly. To run it locally ([web/build.sh](web/build.sh) lists the toolchain it needs):
-
-```bash
-sh web/build.sh
-python3 web/serve.py   # http://localhost:8770
-```
-
-## License
-
-[MIT](LICENSE). Dependencies keep their own licenses ([web/THIRD_PARTY_LICENSES.txt](web/THIRD_PARTY_LICENSES.txt)), as do the test and sample images (the `SOURCES.md` next to them). JPEG output is encoded with [mozjpeg](vendor/mozjpeg): this software is based in part on the work of the Independent JPEG Group.
+Luma 基于 [heydeer/pngdeer](https://github.com/heydeer/pngdeer) 的部分代码发展，保留原作者版权声明，采用 [MIT 许可证](LICENSE)。第三方组件遵循各自许可证；样图来源见 [SOURCES.md](bench/images/SOURCES.md)。

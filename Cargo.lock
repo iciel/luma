@@ -272,6 +272,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "luma"
+version = "0.2.1"
+dependencies = [
+ "crc32fast",
+ "fast-ssim2",
+ "libm",
+ "miniz_oxide 0.9.1",
+ "oxipng",
+ "png",
+ "pngdeer-libwebp",
+ "rayon",
+ "rgb",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
 name = "magetypes"
 version = "0.9.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -349,23 +366,6 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide 0.8.9",
-]
-
-[[package]]
-name = "pngdeer"
-version = "0.2.1"
-dependencies = [
- "crc32fast",
- "fast-ssim2",
- "libm",
- "miniz_oxide 0.9.1",
- "oxipng",
- "png",
- "pngdeer-libwebp",
- "rayon",
- "rgb",
- "zune-core",
- "zune-jpeg",
 ]
 
 [[package]]
