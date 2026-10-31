@@ -27,13 +27,13 @@ impl FastCompressed {
 
 /// Produce one palette at full resolution, keeping an exact palette where possible.
 /// Return the smaller of that candidate and the input with unrelated metadata removed.
-/// Animation and large pixel buffers are passed through, not silently flattened/downscaled.
+/// Reject animation, images above the pixel limit and results that do not reduce size.
 pub fn compress_fast(input: &[u8]) -> Result<FastCompressed, codec::Error> {
     let started = Instant::now();
     let chunks = checked_chunks(input)?;
     let finish = |png, outcome, colors| FastCompressed { png, outcome, colors, elapsed_ms: started.elapsed().as_millis() };
     if chunks.iter().any(|(kind, _)| *kind == b"acTL") {
-        return Ok(finish(input.to_vec(), "animation_passthrough", 0));
+        return Err("fast PNG does not support animation; use the quality preset for APNG".into());
     }
     let width = u32::from_be_bytes(input[16..20].try_into()?);
     let height = u32::from_be_bytes(input[20..24].try_into()?);
@@ -41,7 +41,7 @@ pub fn compress_fast(input: &[u8]) -> Result<FastCompressed, codec::Error> {
         return Err("invalid PNG dimensions".into());
     }
     if u64::from(width) * u64::from(height) > MAX_PIXELS as u64 {
-        return Ok(finish(input.to_vec(), "size_passthrough", 0));
+        return Err("fast PNG exceeds the 8000000 pixel limit; use the quality preset".into());
     }
     // Decode before stripping: corrupt image data must not become a successful output.
     let bitmap = codec::decode(input)?;
@@ -73,11 +73,8 @@ pub fn compress_fast(input: &[u8]) -> Result<FastCompressed, codec::Error> {
     };
     let candidate = codec::with_chunks(&codec::encode_palette(&palette, &indices, bitmap.width, bitmap.height), &display);
     let (png, outcome) = if candidate.len() < stripped.len() { (candidate, outcome) } else { (stripped, "metadata_only") };
-    if png.len() < input.len() {
-        Ok(finish(png, outcome, palette.len()))
-    } else {
-        Ok(finish(input.to_vec(), "original", palette.len()))
-    }
+    crate::require_smaller(input, &png)?;
+    Ok(finish(png, outcome, palette.len()))
 }
 
 /// Validate chunk framing and CRCs before reading headers or retaining encoded data.

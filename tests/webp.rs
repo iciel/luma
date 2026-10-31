@@ -152,20 +152,32 @@ fn refuses_what_webp_cant_show() {
 }
 
 #[test]
+fn both_webp_presets_reject_size_growth_including_metadata() {
+    let profile = vec![42u8; 4096];
+    let iccp = [&b"profile\0\0"[..], &miniz_oxide::deflate::compress_to_vec_zlib(&profile, 6)].concat();
+    let input = codec::with_chunks(&png(&vec![RGBA::new(255, 0, 0, 255); 96 * 80]), &png_chunk(b"iCCP", &iccp));
+    assert!(input.len() < profile.len());
+    let quality = compress_webp(&input, &Settings::default()).err().expect("quality must reject larger output");
+    let fast = luma::compress_webp_fast(&input).err().expect("fast must reject larger output");
+    assert!(quality.to_string().starts_with("no_smaller_output:"));
+    assert!(fast.to_string().starts_with("no_smaller_output:"));
+}
+
+#[test]
 fn command_line_picks_webp_from_the_name() {
-    let dir = std::env::temp_dir().join(format!("pngdeer-webp-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("luma-webp-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let (input, output) = (dir.join("in.png"), dir.join("out.webp"));
     std::fs::write(&input, png(&photo(false))).unwrap();
-    let run = std::process::Command::new(env!("CARGO_BIN_EXE_pngdeer")).arg(&input).arg("-o").arg(&output).args(["--target", "70"]).output().unwrap();
+    let run = std::process::Command::new(env!("CARGO_BIN_EXE_luma")).arg(&input).arg("-o").arg(&output).args(["--target", "70"]).output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     let report = String::from_utf8(run.stdout).unwrap();
     assert!(report.starts_with(r#"{"format": "webp", "target": 70.00"#), "{report}");
     let file = std::fs::read(&output).unwrap();
     assert_eq!(&file[8..12], b"WEBP");
-    // --score reads it back, and gets the report's score
-    let score = std::process::Command::new(env!("CARGO_BIN_EXE_pngdeer")).arg(&input).arg("--score").arg(&output).output().unwrap();
-    let score: f64 = String::from_utf8(score.stdout).unwrap().trim().parse().unwrap();
+    // Decode the emitted file and independently compare its score with the report.
+    let decoded = webp::decode(&file).unwrap();
+    let score = search::score(&photo(false), &decoded.pixels, 96, 80).unwrap();
     let reported: f64 = report.split(r#""score": "#).nth(1).unwrap().split(',').next().unwrap().parse().unwrap();
     assert!(score >= 70.0 && (score - reported).abs() < 1e-3, "{score} vs {reported}");
     std::fs::remove_dir_all(&dir).unwrap();

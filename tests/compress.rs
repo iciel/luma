@@ -72,6 +72,52 @@ fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
     [&(data.len() as u32).to_be_bytes()[..], kind, data, &crc.finalize().to_be_bytes()].concat()
 }
 
+#[test]
+fn neither_png_preset_returns_an_unchanged_minimal_image() {
+    let mut input = b"\x89PNG\r\n\x1a\n".to_vec();
+    input.extend(png_chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0]));
+    // zlib stream for a filter byte and one black pixel, with no optional PNG chunks.
+    input.extend(png_chunk(b"IDAT", &[120, 218, 99, 96, 0, 0, 0, 2, 0, 1]));
+    input.extend(png_chunk(b"IEND", &[]));
+    let quality = compress(&input, &Settings::default()).err().expect("quality must reject an unchanged image");
+    let fast = luma::compress_fast(&input).err().expect("fast must reject an unchanged image");
+    assert!(quality.to_string().starts_with("no_smaller_output:"));
+    assert!(fast.to_string().starts_with("no_smaller_output:"));
+
+    let dir = std::env::temp_dir().join(format!("luma-size-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("source.png");
+    let destination = dir.join("output.png");
+    std::fs::write(&source, &input).unwrap();
+    for preset in ["quality", "fast"] {
+        for output in ["-", destination.to_str().unwrap(), source.to_str().unwrap()] {
+            let run = std::process::Command::new(env!("CARGO_BIN_EXE_luma")).arg(&source).args(["-o", output, "--preset", preset]).output().unwrap();
+            assert!(!run.status.success() && run.stdout.is_empty());
+            assert!(String::from_utf8_lossy(&run.stderr).contains("no_smaller_output:"));
+            assert!(!destination.exists());
+            assert_eq!(std::fs::read(&source).unwrap(), input);
+        }
+    }
+    std::fs::remove_file(source).unwrap();
+    std::fs::remove_dir(dir).unwrap();
+}
+
+#[test]
+fn fast_png_rejects_animation_and_large_headers_instead_of_returning_the_input() {
+    for (width, height, animated, expected) in [(4000u32, 3000u32, false, "pixel limit"), (1, 1, true, "animation")] {
+        let mut input = b"\x89PNG\r\n\x1a\n".to_vec();
+        let header = [&width.to_be_bytes()[..], &height.to_be_bytes(), &[1, 0, 0, 0, 0]].concat();
+        input.extend(png_chunk(b"IHDR", &header));
+        if animated {
+            input.extend(png_chunk(b"acTL", &[0, 0, 0, 2, 0, 0, 0, 0]));
+        }
+        input.extend(png_chunk(b"IDAT", &[120, 218, 99, 96, 0, 0, 0, 2, 0, 1]));
+        input.extend(png_chunk(b"IEND", &[]));
+        let error = luma::compress_fast(&input).err().expect("fast must reject unsupported inputs");
+        assert!(error.to_string().contains(expected));
+    }
+}
+
 /// The chunk types of a PNG file, in order.
 fn chunk_types(png: &[u8]) -> Vec<[u8; 4]> {
     let mut types = Vec::new();

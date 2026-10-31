@@ -48,7 +48,7 @@ def main():
         report = json.loads(result.stderr)
         original, output = chunks(data), chunks(result.stdout)
         assert original[0][1][:8] == output[0][1][:8], "dimensions changed"
-        assert len(result.stdout) <= len(data), "output grew"
+        assert len(result.stdout) < len(data), "successful output must be smaller"
         assert report["preset"] == "fast" and report["score"] is None
         assert report["bytes"] == len(result.stdout)
         (args.output / (name + ".png")).write_bytes(result.stdout)
@@ -59,13 +59,18 @@ def main():
         print(json.dumps(row), flush=True)
         return result.stdout
 
-    samples = ["icons/twemoji-1f4a1.png", "3d/fluent-cat-face.png", "illustrations/bicycle-diagram-es.png",
+    samples = ["3d/fluent-cat-face.png", "illustrations/bicycle-diagram-es.png",
                "photos/kodim03.png", "photos-alpha/cup-of-tea.png"]
     for relative in samples:
         source = ROOT / "bench/images" / relative
         data = source.read_bytes()
         verify(source.stem, data)
         assert source.read_bytes() == data, "source modified"
+
+    # This bundled icon was already smaller than the fast palette candidate.
+    icon = (ROOT / "bench/images/icons/twemoji-1f4a1.png").read_bytes()
+    result = subprocess.run(command, input=icon, capture_output=True, timeout=10)
+    assert result.returncode != 0 and not result.stdout and b"no_smaller_output" in result.stderr
 
     # Exact two-color RGBA image with partial transparency, text metadata and EXIF orientation.
     raw = (b"\0" + bytes([0, 0, 0, 255, 200, 30, 20, 128]) * 16) * 24
@@ -99,12 +104,39 @@ def main():
     report = json.loads(result.stderr)
     assert report["score"] is not None and report["bytes"] == len(result.stdout)
     assert chunks(result.stdout)[0][1][:8] == chunks(sample)[0][1][:8]
-    assert len(result.stdout) <= len(sample)
+    assert len(result.stdout) < len(sample)
     (args.output / "quality-kodim03.png").write_bytes(result.stdout)
     for bad_target in ("nan", "inf", "-1", "101"):
         result = subprocess.run([str(exe), "-", "-o", "-", "--target", bad_target],
                                 input=sample, capture_output=True, timeout=10)
         assert result.returncode != 0 and not result.stdout
+
+    # A minimal grayscale PNG cannot become smaller. Neither preset may return it unchanged,
+    # create a destination, or truncate an existing destination.
+    tiny = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 1, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\0\0", 9)) + chunk(b"IEND", b""))
+    for preset in ("quality", "fast"):
+        reject = [str(exe), "-", "-o", "-", "--preset", preset]
+        result = subprocess.run(reject, input=tiny, capture_output=True, timeout=60)
+        assert result.returncode != 0 and not result.stdout and b"no_smaller_output" in result.stderr
+        destination = args.output / f"refused-{preset}.png"
+        assert not destination.exists()
+        result = subprocess.run([str(exe), "-", "-o", str(destination), "--preset", preset],
+                                input=tiny, capture_output=True, timeout=60)
+        assert result.returncode != 0 and not destination.exists()
+        source = args.output / f"existing-{preset}.png"
+        source.write_bytes(tiny)
+        result = subprocess.run([str(exe), str(source), "-o", str(source), "--preset", preset],
+                                capture_output=True, timeout=60)
+        assert result.returncode != 0 and source.read_bytes() == tiny
+
+    # These were formerly silent passthroughs in fast PNG.
+    header = struct.pack(">IIBBBBB", 4000, 3000, 1, 0, 0, 0, 0)
+    large = tiny[:8] + chunk(b"IHDR", header) + tiny[33:]
+    animated = tiny[:33] + chunk(b"acTL", struct.pack(">II", 2, 0)) + tiny[33:]
+    for data, message in [(large, b"pixel limit"), (animated, b"animation")]:
+        result = subprocess.run(command, input=data, capture_output=True, timeout=10)
+        assert result.returncode != 0 and not result.stdout and message in result.stderr
     summary = {"exe_sha256": hashlib.sha256(exe.read_bytes()).hexdigest(), "rows": rows, "checks_passed": True}
     (args.output / "results.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

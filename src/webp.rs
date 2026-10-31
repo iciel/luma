@@ -22,7 +22,7 @@ impl FastWebp {
 }
 
 /// Encode one WebP candidate at quality 80, method 3, with lossless alpha and sharp YUV.
-/// Always returns WebP, even if larger; callers decide whether to keep the original.
+/// Fails if the complete WebP is not smaller than the input.
 pub fn compress_webp_fast(input: &[u8]) -> Result<FastWebp, Error> {
     let started = std::time::Instant::now();
     let (bitmap, icc) = fast_source(input)?;
@@ -44,6 +44,7 @@ pub fn compress_webp_fast(input: &[u8]) -> Result<FastWebp, Error> {
         Some(icc) => with_icc(&file, &icc, bitmap.width, bitmap.height),
         None => file,
     };
+    crate::require_smaller(input, &webp)?;
     Ok(FastWebp { webp, elapsed_ms: started.elapsed().as_millis() })
 }
 
@@ -258,6 +259,7 @@ pub fn compress_webp(input: &[u8], settings: &Settings) -> Result<CompressedWebp
         Some(icc) => with_icc(&file, &icc, w, h),
         None => file,
     };
+    crate::require_smaller(input, &webp)?;
     Ok(CompressedWebp {
         webp,
         target,
@@ -300,6 +302,7 @@ fn photo_webp(input: &[u8], settings: &Settings) -> Result<CompressedWebp, Error
         Some(icc) => with_icc(&lossy.file, &icc, w, h),
         None => lossy.file,
     };
+    crate::require_smaller(input, &webp)?;
     Ok(CompressedWebp {
         target,
         png: None,

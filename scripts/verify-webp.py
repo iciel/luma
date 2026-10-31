@@ -10,6 +10,7 @@ import zlib
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageOps, ImageStat
+from verify_fast import chunk
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +36,7 @@ def main():
             assert report["preset"] == "fast" and report["score"] is None
             assert report["quality"] == 80 and report["method"] == 3
         assert report["bytes"] == len(result.stdout)
+        assert len(result.stdout) < len(data), "successful output must be smaller"
         assert result.stdout[:4] == b"RIFF" and result.stdout[8:12] == b"WEBP"
         assert int.from_bytes(result.stdout[4:8], "little") == len(result.stdout) - 8
         with Image.open(io.BytesIO(data)) as source:
@@ -94,6 +96,28 @@ def main():
         result = subprocess.run(command, input=bad, capture_output=True, timeout=10)
         assert result.returncode != 0 and not result.stdout and result.stderr
 
+    # PNG stores ICC compressed; WebP stores it uncompressed. Include metadata in the
+    # final size check even when the encoded pixels themselves would be smaller.
+    buffer = io.BytesIO()
+    Image.new("RGB", (32, 24), "red").save(buffer, format="PNG")
+    small = buffer.getvalue()
+    profile = b"test profile " * 1024
+    icc = chunk(b"iCCP", b"profile\0\0" + zlib.compress(profile))
+    tagged = small[:33] + icc + small[33:]
+    result = subprocess.run(command, input=tagged, capture_output=True, timeout=60)
+    assert result.returncode != 0 and not result.stdout and b"no_smaller_output" in result.stderr
+    destination = args.output / "refused.webp"
+    assert not destination.exists()
+    result = subprocess.run([str(exe), "-", "-o", str(destination), "--preset", args.preset],
+                            input=tagged, capture_output=True, timeout=60)
+    assert result.returncode != 0 and not destination.exists()
+    destination = args.output / "existing.webp"
+    sentinel = (args.output / "kodim03.webp").read_bytes()
+    destination.write_bytes(sentinel)
+    result = subprocess.run([str(exe), "-", "-o", str(destination), "--preset", args.preset],
+                            input=tagged, capture_output=True, timeout=60)
+    assert result.returncode != 0 and destination.read_bytes() == sentinel
+
     if args.preset == "fast":
         from PIL.PngImagePlugin import PngInfo
 
@@ -111,9 +135,6 @@ def main():
             assert error(expected) < error(expected.transpose(Image.Transpose.ROTATE_180))
             with Image.open(args.output / f"png-orientation-{orientation}.webp") as encoded:
                 assert not encoded.getexif() and "Comment" not in encoded.info
-
-        def chunk(kind, payload):
-            return len(payload).to_bytes(4, "big") + kind + payload + zlib.crc32(kind + payload).to_bytes(4, "big")
 
         # Reject animation, invalid CRC, malformed EXIF and oversized headers before output.
         large = bytearray(data[16:29])

@@ -27,6 +27,14 @@ pub use webp::{compress_webp, compress_webp_fast, CompressedWebp, FastWebp};
 /// An 8-bit RGBA pixel (the `rgb` crate's).
 pub use rgb::RGBA8 as RGBA;
 
+/// Successful compression must reduce the complete encoded file, including metadata.
+pub(crate) fn require_smaller(input: &[u8], output: &[u8]) -> Result<(), Error> {
+    if output.len() >= input.len() {
+        return Err(format!("no_smaller_output: input {} bytes, candidate {} bytes; try another preset or output format", input.len(), output.len()).into());
+    }
+    Ok(())
+}
+
 /// The default quality-search preview size: 5 MP screenshots in
 /// seconds, for files about 1% bigger than a full-size search's.
 pub const PREVIEW_PIXELS: usize = 350_000;
@@ -98,8 +106,8 @@ pub struct Compressed {
     pub png: Vec<u8>,
     pub report: Report,
     /// "hit", "miss" (target out of reach, closest kept), "exact" (lossless palette), "lossless"
-    /// (a palette came out bigger than the input, so the input optimized losslessly instead), or
-    /// "original" (nothing smaller than the input was found, so it is returned unchanged).
+    /// (a palette came out bigger than the input, so the input optimized losslessly instead).
+    /// A WebP report may also contain an internal "original" PNG candidate.
     pub outcome: &'static str,
 }
 
@@ -112,19 +120,22 @@ impl Compressed {
 
 /// Compresses one PNG file: the search, oxipng -o 2 on its result, the input optimized losslessly
 /// if the palette came out bigger, a lossless palette for images of few colors when it costs little
-/// more (EXACT_SLACK), and the input itself if nothing beats it. An animated PNG stays animated: its
-/// frames are searched together on one palette (search::run_animation).
+/// more (EXACT_SLACK). Fails if no smaller output is found. An animated PNG stays animated:
+/// its frames are searched together on one palette (search::run_animation).
 pub fn compress(input: &[u8], settings: &Settings) -> Result<Compressed, Error> {
-    if apng::is_animated(input) {
+    let result = if apng::is_animated(input) {
         let animation = apng::decode(input)?;
         let (w, h, timing) = (animation.width, animation.height, &animation.timing);
         let (searched, report) = search::run_animation(&animation.pixels, w, h, animation.frames, timing, settings)?;
-        return finish(input, searched, report, &animation.pixels, settings, |palette, indices| apng::encode(palette, indices, w, h, timing));
-    }
-    compress_decoded(input, &codec::decode(input)?, settings)
+        finish(input, searched, report, &animation.pixels, settings, |palette, indices| apng::encode(palette, indices, w, h, timing))?
+    } else {
+        compress_decoded(input, &codec::decode(input)?, settings)?
+    };
+    require_smaller(input, &result.png)?;
+    Ok(result)
 }
 
-/// `compress` of a still image already decoded.
+/// PNG candidate for a decoded image. WebP can still shrink an unchanged PNG candidate.
 fn compress_decoded(input: &[u8], bitmap: &codec::Bitmap, settings: &Settings) -> Result<Compressed, Error> {
     let (w, h) = (bitmap.width, bitmap.height);
     let (searched, report) = search::run(&bitmap.pixels, w, h, settings)?;
@@ -148,7 +159,7 @@ fn finish(
     let color = codec::color_chunks(input);
     let mut png = codec::with_chunks(&codec::optimize(&searched)?, &color);
     let mut outcome = if report.miss { "miss" } else { "hit" };
-    if png.len() > input.len() {
+    if png.len() >= input.len() {
         // smooth gradients: the palette costs more than the source itself
         png = codec::with_chunks(&codec::optimize(input)?, &color);
         outcome = "lossless";
@@ -159,7 +170,7 @@ fn finish(
         // so skip it where even 25% couldn't bring the lossless file within budget
         if exact.len() as f64 * 0.75 <= budget {
             let exact = codec::with_chunks(&codec::optimize(&exact)?, &color);
-            if exact.len() as f64 <= budget {
+            if exact.len() as f64 <= budget && exact.len() < input.len() {
                 png = exact;
                 outcome = "exact";
             }
