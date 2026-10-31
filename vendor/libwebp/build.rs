@@ -18,11 +18,14 @@ fn main() {
         // differ from the plain C's), and no WEBP_USE_THREAD
         .define("HAVE_CONFIG_H", None)
         .define("NDEBUG", None)
-        // clang fuses a * b + c where the target has FMA (arm64), and a fused result differs
-        .flag("-ffp-contract=off")
-        .flag("-include")
-        .flag(clib.join("pngdeer_clib.h").to_str().unwrap())
         .warnings(false);
+    let header = clib.join("pngdeer_clib.h");
+    if build.get_compiler().is_like_msvc() {
+        build.flag("/fp:strict").flag(format!("/FI{}", header.display()));
+    } else {
+        // clang fuses a * b + c where the target has FMA (arm64), and a fused result differs
+        build.flag("-ffp-contract=off").flag("-include").flag(header.to_str().unwrap());
+    }
     if wasm {
         build.include(env::var("DEP_PNGDEER_CLIB_LIBC").unwrap()).flag("-ffreestanding");
     }

@@ -26,16 +26,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build PNG CLI
-        run: cargo build --release --locked --package pngdeer --bin pngdeer --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng
+      - name: Build image CLI
+        run: cargo build --release --locked --package pngdeer --bin pngdeer --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng,webp,jpeg-decode
       - name: Package executable and licenses
         run: |
           New-Item -ItemType Directory -Path package | Out-Null
           Copy-Item -LiteralPath target/x86_64-pc-windows-msvc/release/pngdeer.exe -Destination package/
           Copy-Item -LiteralPath LICENSE -Destination package/
-          python scripts/release-notices.py --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng --output package/THIRD_PARTY_LICENSES.txt
+          python scripts/release-notices.py --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng,webp,jpeg-decode --output package/THIRD_PARTY_LICENSES.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "Commit: $env:GITHUB_SHA`nTarget: x86_64-pc-windows-msvc`nFeatures: parallel,oxipng`n" | Set-Content -LiteralPath package/BUILD.txt
+          "Commit: $env:GITHUB_SHA`nTarget: x86_64-pc-windows-msvc`nFeatures: parallel,oxipng,webp,jpeg-decode`n" | Set-Content -LiteralPath package/BUILD.txt
           $checksum = (Get-FileHash -LiteralPath package/pngdeer.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$checksum  pngdeer.exe" | Set-Content -LiteralPath package/SHA256SUMS.txt -Encoding ascii
       - uses: actions/upload-artifact@v4

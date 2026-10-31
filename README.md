@@ -2,7 +2,7 @@
 
 This repository starts from the [heydeer/pngdeer](https://github.com/heydeer/pngdeer) 0.2.1 source snapshot and adds a Windows x64 build.
 
-The **Windows release** GitHub Actions workflow builds `pngdeer.exe` on `windows-2022` with `parallel,oxipng` enabled and JPEG/WebP disabled. It only builds and packages the executable; it does not run tests, Clippy, benchmarks, or the executable. Download **pngdeer-windows-x64** from the workflow run's **Artifacts** section; the archive contains the executable, licenses, source commit, and SHA-256 checksum. Artifacts are retained for 30 days, and the workflow can be started manually.
+The **Windows release** GitHub Actions workflow builds `pngdeer.exe` on `windows-2022` with `parallel,oxipng,webp,jpeg-decode` enabled: PNG compression, PNG/JPEG to WebP, and JPEG decoding for scoring. JPEG output (mozjpeg) is disabled in this artifact. It only builds and packages the executable; it does not run tests, Clippy, benchmarks, or the executable. Download **pngdeer-windows-x64** from the workflow run's **Artifacts** section; the archive contains the executable, licenses, source commit, and SHA-256 checksum. Artifacts are retained for 30 days, and the workflow can be started manually.
 
 The original search preset (`--preset quality`) remains the default. An explicit `--preset fast` selects the fast preset below; both presets support `-` for binary PNG stdin/stdout. Reports go to stderr when the output is `-`, and to stdout for file output.
 
@@ -26,7 +26,25 @@ After downloading a new Windows artifact, run the executable checks separately f
 python scripts/verify-fast.py --exe path/to/pngdeer.exe --output dist/fast-check
 ```
 
-This checks bundled images, binary stdin/stdout, output dimensions and CRCs, transparency, metadata, Chinese/spaced paths, invalid input, and preserved source files. It records timings and sizes; it does not compile Rust or establish AI recognition accuracy. The script and preset await validation with the new downloaded executable.
+This checks bundled images, binary stdin/stdout, output dimensions and CRCs, transparency, metadata, Chinese/spaced paths, invalid input, and preserved source files. It records timings and sizes; it does not compile Rust or establish AI recognition accuracy. The checks passed on the Windows artifact from commit 4d54ece. Bundled bicycle/photo/transparent-teacup images took 0.187/0.202/0.625 seconds and shrank by 68.0%/66.4%/56.4% in one local run; these are measurements, not latency guarantees.
+
+## Windows WebP output
+
+WebP uses the existing quality search; it is opt-in and is not part of the fast preset. PNG input supports PNG or WebP output. JPEG input supports WebP output in the Windows artifact; use an explicit format for pipes. JPEG EXIF orientation is applied to pixels, and non-sRGB ICC profiles are retained. WebP conversion can produce a larger file; callers must compare sizes and keep the original when appropriate. Animated PNGs and unsupported color descriptions produce errors rather than losing those properties.
+
+```sh
+pngdeer input.png -o output.webp --preset quality
+pngdeer photo.jpg -o output.webp
+pngdeer - -o - --format webp
+```
+
+The new WebP Windows build awaits CI and downloaded-executable verification. Run its checks locally after downloading (Pillow independently decodes outputs and creates JPEG fixtures from bundled images):
+
+```sh
+uv run --with pillow python scripts/verify-webp.py --exe path/to/pngdeer.exe --output dist/webp-check
+```
+
+The rondo gateway currently accepts PNG compressor output only; WebP must not be configured there until its output validation and MIME handling are updated.
 
 **Smaller PNGs. Same picture.** pngdeer is a lossy PNG compressor with no quality slider: for each image it searches palette sizes from 2 to 256 colors, with and without dithering, scores each result with a perceptual metric, and keeps the smallest file that still looks right. At the same quality, the median image comes out **8–12% smaller than with TinyPNG**, the best result of any open-source compressor we've measured.
 
