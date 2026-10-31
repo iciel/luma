@@ -32,7 +32,20 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --package luma --all-targets --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng,webp,jpeg-decode --no-deps -- -D warnings
       - name: Test
+        env:
+          CARGO_PROFILE_TEST_OPT_LEVEL: 2
         run: cargo test --locked --package luma --all-targets --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng,webp,jpeg-decode
+      - name: Verify PNG and WebP presets
+        run: |
+          python -m pip install pillow==12.3.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = "target/x86_64-pc-windows-msvc/debug/luma.exe"
+          foreach ($preset in @("quality", "fast")) {
+            python scripts/verify-png.py --exe $exe --output "dist/png-$preset" --preset $preset
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            python scripts/verify-webp.py --exe $exe --output "dist/webp-$preset" --preset $preset
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Build image CLI
         run: cargo build --release --locked --package luma --bin luma --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng,webp,jpeg-decode
       - name: Package executable and licenses

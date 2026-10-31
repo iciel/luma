@@ -1,16 +1,18 @@
-"""Check a downloaded Windows WebP CLI; requires Pillow, never builds Rust."""
+"""Check WebP output in either Luma preset using an existing executable; requires Pillow."""
 
 import argparse
 import hashlib
 import io
 import json
+import math
 import subprocess
 import time
 import zlib
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageOps, ImageStat
-from verify_fast import chunk
+
+from image_fixtures import animated_png, chunk, solid_png
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,15 +28,19 @@ def main():
     command = [str(exe), "-", "-o", "-", "--format", "webp", "--preset", args.preset]
     rows = []
 
-    def verify(name, data):
+    def verify(name, data, *options):
         started = time.perf_counter()
-        result = subprocess.run(command, input=data, capture_output=True, timeout=180, check=True)
+        result = subprocess.run(command + list(options), input=data, capture_output=True, timeout=600)
+        assert result.returncode == 0, f"{name}: {result.stderr.decode(errors='replace')}"
         seconds = time.perf_counter() - started
         report = json.loads(result.stderr)
         assert report["format"] == "webp"
         if args.preset == "fast":
             assert report["preset"] == "fast" and report["score"] is None
             assert report["quality"] == 80 and report["method"] == 3
+        else:
+            assert math.isfinite(report["target"]) and math.isfinite(report["score"])
+            assert report["tries"] > 0
         assert report["bytes"] == len(result.stdout)
         assert len(result.stdout) < len(data), "successful output must be smaller"
         assert result.stdout[:4] == b"RIFF" and result.stdout[8:12] == b"WEBP"
@@ -92,6 +98,33 @@ def main():
     with Image.open(destination) as image:
         image.load()
         assert image.format == "WEBP" and image.size == photo.size
+
+    if args.preset == "quality":
+        # Default WebP conversion must match the explicitly selected quality preset.
+        result = subprocess.run([str(exe), "-", "-o", "-", "--format", "webp"], input=data,
+                                capture_output=True, timeout=180, check=True)
+        assert result.stdout == destination.read_bytes()
+        buffer = io.BytesIO()
+        photo.save(buffer, format="PNG", compress_level=0)
+        sample = buffer.getvalue()
+        verify("target-70", sample, "--target", "70")
+        report = rows[-1]["report"]
+        assert report["target"] == 70 and report["score"] >= 69.999
+        verify("unreachable-target", sample, "--target", "100")
+        report = rows[-1]["report"]
+        assert report["target"] == 100 and report["score"] < 100
+
+    animation = animated_png()
+    result = subprocess.run(command, input=animation, capture_output=True, timeout=60)
+    assert result.returncode != 0 and not result.stdout and b"animated" in result.stderr
+    large = solid_png()
+    if args.preset == "quality":
+        verify("over-8mp", large)
+    else:
+        result = subprocess.run(command, input=large, capture_output=True, timeout=60)
+        assert result.returncode != 0 and not result.stdout and b"8000000" in result.stderr
+    del large
+
     for bad in (b"not an image", b"\xff\xd8\xffbroken JPEG"):
         result = subprocess.run(command, input=bad, capture_output=True, timeout=10)
         assert result.returncode != 0 and not result.stdout and result.stderr
