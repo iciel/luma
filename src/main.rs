@@ -36,14 +36,21 @@
 //!                                           each against the frame OTHER shows at that time
 //!   pngdeer IN.png -o OUT.png --upscale K   nearest-neighbour K× enlargement, written as RGBA
 
-use std::{env, fs, process, sync::OnceLock, time::Instant};
+use std::{
+    env, fs,
+    io::{self, Read, Write},
+    process,
+    sync::OnceLock,
+    time::Instant,
+};
 
 use pngdeer::{codec, search};
 
-const USAGE: &str = "usage: pngdeer IN.png -o OUT.png [--format png|webp] [--target auto|T] [--preview-pixels N] [--variants SPEC]
+const USAGE: &str = "usage: pngdeer IN.png -o OUT.png [--preset quality|fast] [--format png|webp] [--target auto|T] [--preview-pixels N] [--variants SPEC]
        pngdeer IN.jpg -o OUT.jpg|OUT.webp [--target auto|T]
        pngdeer IN.png --score OTHER
-       pngdeer IN.png -o OUT.png --upscale K";
+       pngdeer IN.png -o OUT.png --upscale K
+       pngdeer - -o - --preset fast    (binary PNG stdin/stdout, report on stderr)";
 
 fn main() {
     if let Err(e) = run() {
@@ -54,12 +61,21 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut settings = pngdeer::Settings { clock: Some(now_ms), ..Default::default() };
+    let mut preset = String::from("quality");
+    let mut search_options = false;
     let (mut input, mut output, mut score_against, mut upscale, mut format) = (None, None, None, None::<usize>, None);
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
+        search_options |= arg.starts_with("--webp-");
         let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value\n{USAGE}"));
         match arg.as_str() {
             "-o" => output = Some(value()?),
+            "--preset" => {
+                preset = value()?;
+                if !matches!(preset.as_str(), "quality" | "fast") {
+                    return Err("--preset must be quality or fast".into());
+                }
+            }
             "--format" => format = Some(value()?),
             "--webp-method" => settings.webp.method = value()?.parse()?,
             "--webp-lossless-level" => settings.webp.slow_lossless_level = Some(value()?.parse()?),
@@ -72,22 +88,49 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 settings.webp.reference_quality = if v == "none" { None } else { Some(v.parse()?) };
             }
             "--target" => {
+                search_options = true;
                 let v = value()?;
                 settings.target = if v == "auto" { None } else { Some(v.parse().map_err(|_| format!("bad --target: {v}"))?) };
             }
-            "--preview-pixels" => settings.preview_pixels = value()?.parse()?,
-            "--variants" => settings.variants = search::parse_variants(&value()?)?,
+            "--preview-pixels" => {
+                search_options = true;
+                settings.preview_pixels = value()?.parse()?;
+            }
+            "--variants" => {
+                search_options = true;
+                settings.variants = search::parse_variants(&value()?)?;
+            }
             "--score" => score_against = Some(value()?),
             "--upscale" => upscale = Some(value()?.parse()?),
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return Ok(());
             }
-            _ if arg.starts_with('-') || input.is_some() => return Err(format!("unexpected argument: {arg}\n{USAGE}").into()),
+            _ if (arg.starts_with('-') && arg != "-") || input.is_some() => return Err(format!("unexpected argument: {arg}\n{USAGE}").into()),
             _ => input = Some(arg),
         }
     }
-    let input = fs::read(input.ok_or(USAGE)?)?;
+    if preset == "fast" && (search_options || score_against.is_some() || upscale.is_some() || format.as_deref().is_some_and(|f| f != "png")) {
+        return Err("fast preset accepts PNG output only and does not use search, score or upscale options".into());
+    }
+    let input_path = input.ok_or(USAGE)?;
+    let input = if input_path == "-" {
+        let mut bytes = Vec::new();
+        io::stdin().lock().take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+        if bytes.len() > 64 * 1024 * 1024 {
+            return Err("stdin exceeds the 64 MiB limit".into());
+        }
+        bytes
+    } else {
+        fs::read(input_path)?
+    };
+    if preset == "fast" {
+        let output = output.ok_or(USAGE)?;
+        let result = pngdeer::compress_fast(&input)?;
+        write_output(&output, &result.png)?;
+        report(&output, &result.json());
+        return Ok(());
+    }
 
     if let Some(other) = score_against {
         if pngdeer::apng::is_animated(&input) {
@@ -106,7 +149,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let image = codec::decode(&input)?;
         let (w, h, pixels) = (image.width, image.height, &image.pixels);
         let big: Vec<_> = (0..h * k).flat_map(|y| (0..w * k).map(move |x| pixels[(y / k) * w + x / k])).collect();
-        fs::write(&output, codec::encode_rgba(&big, w * k, h * k))?;
+        write_output(&output, &codec::encode_rgba(&big, w * k, h * k))?;
         return Ok(());
     }
     if is_jpeg(&input) {
@@ -127,16 +170,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return write_webp(&input, &output, &settings);
     }
     let result = pngdeer::compress(&input, &settings)?;
-    fs::write(&output, &result.png)?;
-    println!("{}", result.json());
+    write_output(&output, &result.png)?;
+    report(&output, &result.json());
     Ok(())
+}
+
+fn write_output(path: &str, bytes: &[u8]) -> io::Result<()> {
+    if path == "-" {
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(bytes)?;
+        stdout.flush()
+    } else {
+        fs::write(path, bytes)
+    }
+}
+
+fn report(output: &str, json: &str) {
+    if output == "-" {
+        eprintln!("{json}");
+    } else {
+        println!("{json}");
+    }
 }
 
 #[cfg(feature = "webp")]
 fn write_webp(input: &[u8], output: &str, settings: &pngdeer::Settings) -> Result<(), Box<dyn std::error::Error>> {
     let result = pngdeer::compress_webp(input, settings)?;
-    fs::write(output, &result.webp)?;
-    println!("{}", result.json());
+    write_output(output, &result.webp)?;
+    report(output, &result.json());
     Ok(())
 }
 
@@ -158,8 +219,8 @@ fn is_jpeg(_: &[u8]) -> bool {
 #[cfg(feature = "jpeg")]
 fn write_jpeg(input: &[u8], output: &str, settings: &pngdeer::Settings) -> Result<(), Box<dyn std::error::Error>> {
     let result = pngdeer::compress_jpeg(input, settings)?;
-    fs::write(output, &result.jpeg)?;
-    println!("{}", result.json());
+    write_output(output, &result.jpeg)?;
+    report(output, &result.json());
     Ok(())
 }
 
