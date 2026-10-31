@@ -1,55 +1,72 @@
 # Luma
 
-本地图片压缩工具，支持 PNG → PNG/WebP、JPEG → WebP。图片不会上传到网络。
+本地图片压缩命令行工具。可以压缩 PNG，也可以将 PNG、JPEG 转成 WebP，图片不会上传到网络。
 
-| 预设 | 适合什么情况 | 工作方式 |
-|---|---|---|
-| `quality`（默认） | 更在意压缩效果，可以等待 | 搜索多个候选并计算感知质量评分 |
-| `fast` | 希望尽快完成 | PNG 生成一次调色板；WebP 按质量 80、method 3 编码一次 |
+## 下载与安装
 
-## 下载
+1. 登录 GitHub，打开 [Windows 构建列表](https://github.com/iciel/luma/actions/workflows/windows.yml)。
+2. 进入一次成功的构建，在页面下方 **Artifacts** 中下载 `luma-windows-x64`。
+3. 解压得到 `luma.exe`，将所在文件夹加入 PATH，即可在终端使用 `luma`。
 
-在 [Windows release](https://github.com/iciel/luma/actions/workflows/windows.yml) 成功运行的 **Artifacts** 中下载 `luma-windows-x64`，解压后使用 `luma.exe`。压缩包包含许可证、源提交信息和 SHA-256 校验值。可将程序所在目录加入 PATH。
+目前提供 Windows x64 版本。下载包附带许可证、对应的 Git 提交和 SHA-256 校验值。
 
-## 使用
+## 开始使用
 
 ```sh
+# 压缩 PNG，默认使用 quality 模式
 luma input.png -o output.png
+
+# 更快地压缩 PNG
 luma input.png -o output.png --preset fast
+
+# 转成 WebP：适用于 PNG 和 JPEG
 luma input.png -o output.webp --preset fast
-luma photo.jpg -o output.webp --preset quality
-luma input.png -o output.png --target 85
-luma --help
+luma photo.jpg -o output.webp
 ```
 
-输出名以 `.webp` 结尾时自动选择 WebP，也可以用 `--format png|webp` 明确指定。`--target` 仅用于 `quality`，是感知评分目标，不是编码器质量百分比；无法达到时可能返回最接近的结果，请检查 JSON 报告。
+`-o` 指定输出文件，建议使用与原图不同的文件名。以 `.webp` 结尾时输出 WebP；也可用 `--format png` 或 `--format webp` 明确指定。
 
-支持管道：
+## 选择压缩模式
+
+| 模式 | 适合什么情况 | 区别 |
+|---|---|---|
+| `quality`（默认） | 愿意花更多时间选择压缩结果 | 尝试多个结果，结合图片体积和视觉相似度评分选择输出 |
+| `fast` | 更在意处理速度 | 使用固定策略，不反复搜索或计算相似度评分 |
+
+通常先用默认模式；需要快速处理时，加上 `--preset fast`。两个模式都可能有损，`quality` 不保证每张图片都比 `fast` 更小。Luma 不主动缩小图片分辨率。
+
+`quality` 默认自动选择评分目标。需要手动调整时可以使用：
+
+```sh
+luma input.png -o output.png --target 85
+```
+
+`85` 是视觉相似度的目标分数，不表示“保留 85% 画质”。分数越高通常越保守；达不到目标时可能选择最接近的结果，实际分数见处理报告。`fast` 不接受此参数。
+
+## 格式和大图支持
+
+| 输入 → 输出 | `quality` | `fast` |
+|---|---|---|
+| 静态 PNG → PNG | 支持，包括超过 800 万像素的图片 | 支持；超过 800 万像素时报错 |
+| 静态 PNG / JPEG → WebP | 支持，包括超过 800 万像素的图片 | 支持；超过 800 万像素时报错 |
+| 动画 PNG（APNG）→ PNG | 压缩并保留动画 | 不支持，会报错 |
+| 动画 → WebP、输出 JPEG | 不支持 | 不支持 |
+
+**800 万像素是 `fast` 的处理上限，不是整个工具的上限。** 像素数等于宽 × 高，例如 4000 × 3000 是 1200 万像素。`quality` 可以处理这类大图，但仍受内存和图片格式限制；WebP 的宽、高分别不能超过 16,383 像素。
+
+**成功输出一定比输入文件小。** 两种模式、两种输出格式都检查最终文件的字节数。无法缩小时返回 `no_smaller_output` 错误，不创建或覆盖输出文件，也不向管道写出图片。可以尝试另一种模式或输出格式。
+
+## 管道与处理报告
 
 ```sh
 luma - -o - --preset fast --format webp
 ```
 
-`-` 表示标准输入或输出。图片输出到 stdout 时，JSON 报告写到 stderr；输出到文件时，报告写到 stdout。失败返回非零退出码。
+两个 `-` 分别表示从标准输入读取图片、向标准输出写入图片。此时处理报告写到标准错误，不会混入图片数据。使用文件输出时，报告显示在终端。
 
-## 注意事项
+成功后会输出 JSON 报告，包含文件字节数；`quality` 还包含目标和实际评分，`fast` 的 `score: null` 表示没有评分。
 
-- 压缩可能有损，不能保证小字或 AI 识别效果不变；`fast` 不评分，报告中的 `score` 为 `null`。
-- PNG 输出不会比原始文件大，必要时返回原图；WebP 转换可能变大，需要调用方比较体积。
-- 保留必要色彩信息。快速 PNG 清理无关元数据并保留方向；WebP 转换会应用 JPEG 方向，快速 WebP 也会应用 PNG 方向。
-- `quality` 支持 APNG → APNG；快速 PNG 遇到动画或超过 800 万像素时返回原图。WebP 不接受动画，快速 WebP 也不接受超过 800 万像素的输入。
-- 不提供 JPEG 编码。部分色彩配置无法转换成 WebP，会明确报错。
-- stdin 上限 64 MiB。工具没有总耗时限制，调用方可设置进程超时。
-
-## 开发验证
-
-Windows CI 只构建 release 并打包，不运行测试或 Clippy。本地源码检查使用 `cargo fmt --check`；下载程序后执行：
-
-```sh
-python scripts/verify-fast.py --exe path/to/luma.exe --output dist/png-check
-uv run --with pillow python scripts/verify-webp.py --exe path/to/luma.exe --output dist/webp-fast-check --preset fast
-uv run --with pillow python scripts/verify-webp.py --exe path/to/luma.exe --output dist/webp-quality-check --preset quality
-```
+标准输入最多接收 64 MiB。程序没有总耗时限制，自动化调用时可自行设置超时。运行失败时返回非零退出码；更多用法见 `luma --help`。
 
 ## 来源与许可
 
