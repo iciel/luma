@@ -36,15 +36,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True, help="Rust target triple of the release binary")
     parser.add_argument("--output", required=True, type=Path, help="Destination notices file")
+    parser.add_argument("--no-default-features", action="store_true")
+    parser.add_argument("--features", help="Features used for this release build")
     args = parser.parse_args()
+    features = ["--no-default-features"] if args.no_default_features else []
+    if args.features:
+        features += ["--features", args.features]
 
     meta = json.loads(cargo("metadata", "--locked", "--format-version", "1", "--filter-platform", args.target))
     packages = {p["id"]: p for p in meta["packages"]}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
     # Metadata unifies features across the workspace, even with --filter-platform.
-    # cargo tree selects only the CLI's default features, without wasm/quantlab extras.
+    # cargo tree selects the CLI's release features, without wasm/quantlab extras.
     tree = cargo("tree", "--locked", "--package", "pngdeer", "--target", args.target,
-                 "--edges", "normal,no-proc-macro", "--prefix", "none", "--format", "{p}", "--color", "never")
+                 "--edges", "normal,no-proc-macro", "--prefix", "none", "--format", "{p}", "--color", "never", *features)
     active = {(line.split()[0], line.split()[1].removeprefix("v")) for line in tree.splitlines() if line.strip()}
     key = lambda p: (p["name"], p["version"])
     seen, stack = set(), [meta["resolve"]["root"]]

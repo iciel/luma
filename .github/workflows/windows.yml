@@ -1,0 +1,46 @@
+name: Windows release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -C target-feature=+crt-static
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build PNG CLI
+        run: cargo build --release --locked --package pngdeer --bin pngdeer --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng
+      - name: Package executable and licenses
+        run: |
+          New-Item -ItemType Directory -Path package | Out-Null
+          Copy-Item -LiteralPath target/x86_64-pc-windows-msvc/release/pngdeer.exe -Destination package/
+          Copy-Item -LiteralPath LICENSE -Destination package/
+          python scripts/release-notices.py --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng --output package/THIRD_PARTY_LICENSES.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "Commit: $env:GITHUB_SHA`nTarget: x86_64-pc-windows-msvc`nFeatures: parallel,oxipng`n" | Set-Content -LiteralPath package/BUILD.txt
+          $checksum = (Get-FileHash -LiteralPath package/pngdeer.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$checksum  pngdeer.exe" | Set-Content -LiteralPath package/SHA256SUMS.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pngdeer-windows-x64
+          path: package/
+          if-no-files-found: error
+          retention-days: 30

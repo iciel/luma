@@ -1,5 +1,11 @@
 # pngdeer
 
+This repository starts from the [heydeer/pngdeer](https://github.com/heydeer/pngdeer) 0.2.1 source snapshot and adds a Windows x64 build.
+
+The **Windows release** GitHub Actions workflow builds `pngdeer.exe` on `windows-2022` with `parallel,oxipng` enabled and JPEG/WebP disabled. It only builds and packages the executable; it does not run tests, Clippy, benchmarks, or the executable. Download **pngdeer-windows-x64** from the workflow run's **Artifacts** section; the archive contains the executable, licenses, source commit, and SHA-256 checksum. Artifacts are retained for 30 days, and the workflow can be started manually.
+
+This first Windows build preserves the existing file-based CLI (`pngdeer input.png -o output.png`). It does not yet add stdin/stdout image transport or change the compression algorithm.
+
 **Smaller PNGs. Same picture.** pngdeer is a lossy PNG compressor with no quality slider: for each image it searches palette sizes from 2 to 256 colors, with and without dithering, scores each result with a perceptual metric, and keeps the smallest file that still looks right. At the same quality, the median image comes out **8–12% smaller than with TinyPNG**, the best result of any open-source compressor we've measured.
 
 **[Try it in your browser →](https://heydeer.ai/open-source/pngdeer)** Nothing is uploaded: images are compressed on your device.
