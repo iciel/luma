@@ -1,7 +1,4 @@
-//! The C library functions pngdeer's vendored C code (vendor/libwebp, vendor/mozjpeg) calls, where
-//! they would differ between targets or wasm32 has none: the inexact math functions and qsort on
-//! every target, and the allocator on wasm32 (the rest of what wasm32 needs is libc.c). The crates
-//! that use it link it with `use pngdeer_clib as _;`.
+//! Shared math and stable sorting for the vendored native WebP library.
 
 use std::ffi::{c_int, c_void};
 
@@ -58,67 +55,6 @@ unsafe extern "C" fn pngdeer_qsort(base: *mut c_void, count: usize, size: usize,
     order.sort_by(|&a, &b| compare(element(a), element(b)).cmp(&0));
     let sorted: Vec<u8> = order.iter().flat_map(|&i| bytes[i * size..(i + 1) * size].iter().copied()).collect();
     bytes.copy_from_slice(&sorted);
-}
-
-// wasm32 has no C library: the vendored libraries' allocations go to Rust's allocator, with the size kept in a
-// header in front of each block for free and realloc.
-#[cfg(target_arch = "wasm32")]
-mod alloc {
-    use std::alloc::{alloc, dealloc, realloc as grow, Layout};
-    use std::ffi::c_void;
-
-    const HEADER: usize = 16; // keeps blocks 16-byte aligned, as malloc's are
-
-    fn layout(size: usize) -> Option<Layout> {
-        Layout::from_size_align(size.checked_add(HEADER)?, HEADER).ok()
-    }
-
-    #[no_mangle]
-    unsafe extern "C" fn malloc(size: usize) -> *mut c_void {
-        let Some(layout) = layout(size) else { return std::ptr::null_mut() };
-        let block = alloc(layout);
-        if block.is_null() {
-            return block.cast();
-        }
-        block.cast::<usize>().write(size);
-        block.add(HEADER).cast()
-    }
-
-    #[no_mangle]
-    unsafe extern "C" fn calloc(count: usize, size: usize) -> *mut c_void {
-        let Some(total) = count.checked_mul(size) else { return std::ptr::null_mut() };
-        let pointer = malloc(total);
-        if !pointer.is_null() {
-            pointer.cast::<u8>().write_bytes(0, total);
-        }
-        pointer
-    }
-
-    #[no_mangle]
-    unsafe extern "C" fn realloc(pointer: *mut c_void, size: usize) -> *mut c_void {
-        if pointer.is_null() {
-            return malloc(size);
-        }
-        let block = pointer.cast::<u8>().sub(HEADER);
-        let old = block.cast::<usize>().read();
-        let (Some(old_layout), Some(_)) = (layout(old), layout(size)) else { return std::ptr::null_mut() };
-        let block = grow(block, old_layout, size + HEADER);
-        if block.is_null() {
-            return block.cast();
-        }
-        block.cast::<usize>().write(size);
-        block.add(HEADER).cast()
-    }
-
-    #[no_mangle]
-    unsafe extern "C" fn free(pointer: *mut c_void) {
-        if pointer.is_null() {
-            return;
-        }
-        let block = pointer.cast::<u8>().sub(HEADER);
-        let size = block.cast::<usize>().read();
-        dealloc(block, layout(size).unwrap());
-    }
 }
 
 #[cfg(test)]

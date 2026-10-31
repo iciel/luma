@@ -1,9 +1,4 @@
-//! PNG reading and writing. Decoding and the writer are pure Rust; `optimize` is oxipng, whose C
-//! libdeflate builds without libc for WebAssembly (the `freestanding` feature).
-//!
-//! The writer is quick rather than small: transparent palette entries first (short tRNS), the
-//! smallest bit depth the palette allows, and the best of a few row-filter strategies at a middling
-//! deflate level. Its sizes rank candidates; the file that ships goes through `optimize` (oxipng).
+//! PNG decoding, palette encoding, color chunks and final oxipng optimization.
 
 use std::io::Cursor;
 

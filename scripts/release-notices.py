@@ -8,10 +8,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = ("license", "licence", "copying", "notice", "copyright", "patents")
-# Files holding a license under another name: the IJG license is in libjpeg's README.
-ALSO = ("readme.ijg",)
-# Statements a license asks binary distributions to make, by crate.
-STATEMENTS = {"pngdeer-mozjpeg": "This software is based in part on the work of the Independent JPEG Group."}
 
 
 def cargo(*args: str) -> str:
@@ -19,7 +15,7 @@ def cargo(*args: str) -> str:
 
 
 def is_license(path: Path) -> bool:
-    return path.name.lower().startswith(NAMES) or path.name.lower() in ALSO
+    return path.name.lower().startswith(NAMES)
 
 
 def license_files(package: dict) -> list[Path]:
@@ -46,8 +42,7 @@ def main() -> None:
     meta = json.loads(cargo("metadata", "--locked", "--format-version", "1", "--filter-platform", args.target))
     packages = {p["id"]: p for p in meta["packages"]}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
-    # Metadata unifies features across the workspace, even with --filter-platform.
-    # cargo tree selects the CLI's release features, without wasm/quantlab extras.
+    # Select only the CLI's release features and runtime dependencies.
     tree = cargo("tree", "--locked", "--package", "pngdeer", "--target", args.target,
                  "--edges", "normal,no-proc-macro", "--prefix", "none", "--format", "{p}", "--color", "never", *features)
     active = {(line.split()[0], line.split()[1].removeprefix("v")) for line in tree.splitlines() if line.strip()}
@@ -83,8 +78,6 @@ def main() -> None:
 
     parts = [f"Third-party software compiled into pngdeer's native CLI ({args.target}), and its licenses.",
              "Each license text below is preceded by the crates it covers.", ""]
-    names = {package["name"] for package in dependencies}
-    parts += [text for crate, text in STATEMENTS.items() if crate in names] + ([""] if names & STATEMENTS.keys() else [])
     for text, labels in sorted(texts.values(), key=lambda item: item[1][0]):
         parts += ["=" * 78, *labels, "-" * 78, text, ""]
     if unfiled:

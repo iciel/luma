@@ -1,21 +1,4 @@
-//! JPEG input (`jpeg-decode` feature) and optional output (`jpeg` feature): `compress_jpeg`
-//! re-encodes a photo at the lowest quality whose SSIMULACRA2 score reaches the target.
-//!
-//! - Decoding: zune-jpeg without its SIMD code, so the pixels, and so the scores and the file, are
-//!   the same on every target, the browser build's too. Its errors come back as errors (libjpeg's
-//!   decoder ends on a longjmp, which the browser build can't make).
-//! - Encoding: the vendored mozjpeg 4.1.5 (vendor/mozjpeg): progressive scans with trellis
-//!   quantization, its quantization table 2 and 4:2:0 chroma. On 42 photos at TinyPNG's quality
-//!   (experiments/jpeg/FINDINGS.md), mozjpeg's default table needs 5% more bytes, 4:4:4 15% more,
-//!   and jpegli at 4:2:0 ties it, but is C++, which the browser build can't link.
-//! - Metadata: the ICC profile unless it is sRGB's (what viewers assume anyway), and the EXIF
-//!   orientation; the rest of EXIF (camera, place, time) is dropped, as TinyPNG drops all of it.
-//! - Never bigger: if no quality reaches the target in fewer bytes than the input, the input.
-//! - Automatic quality: about TinyPNG's JPEG quality, which follows the photo's size rather than
-//!   its content: TinyPNG gives big photos (seen scaled down) a lower quality than small ones. On 60
-//!   photos (experiments/jpeg/FINDINGS.md), its SSIMULACRA2 scores follow AUTO_AT_1MP − AUTO_SLOPE ×
-//!   ln(megapixels) as closely as anything tried (a reference file's score, the input's bit rate),
-//!   at most AUTO_CAP.
+//! JPEG decoding, orientation and color-profile handling for WebP conversion.
 
 use zune_core::bytestream::ZCursor;
 use zune_core::colorspace::ColorSpace;
@@ -23,35 +6,14 @@ use zune_core::options::DecoderOptions;
 use zune_jpeg::JpegDecoder;
 
 use crate::codec::Error;
-#[cfg(feature = "jpeg")]
-use crate::par;
-#[cfg(feature = "jpeg")]
-use crate::quality::{self, Tried};
-#[cfg(feature = "jpeg")]
-use crate::search::Scorer;
-#[cfg(any(feature = "jpeg", feature = "webp"))]
+#[cfg(feature = "webp")]
 use crate::search::AUTO_CAP;
-#[cfg(feature = "jpeg")]
-use crate::Settings;
 use crate::RGBA;
 
-/// The automatic target at one megapixel, and how much lower it is per natural-log step in size:
-/// 74.5 at 0.5 MP, 70.1 at 2 MP, 64.4 at 12 MP.
-#[cfg(any(feature = "jpeg", feature = "webp"))]
+#[cfg(feature = "webp")]
 const AUTO_AT_1MP: f64 = 72.3;
-#[cfg(any(feature = "jpeg", feature = "webp"))]
+#[cfg(feature = "webp")]
 const AUTO_SLOPE: f64 = 3.2;
-/// Where the search aims first: the median quality automatic targets took on the 60 photos.
-#[cfg(feature = "jpeg")]
-const FIRST_QUALITY: f64 = 64.0;
-/// About how many points a file's score gains per quality step there.
-#[cfg(feature = "jpeg")]
-const SLOPE: f64 = 0.6;
-/// A round's files are scored at once while their scored pixels fit in this, one after another
-/// beyond it: each scoring at once adds about 64 bytes a pixel at the peak (a 12 MP photo peaked at
-/// 2.7 GB scoring three at once, 1.3 GB one at a time), and one at a time is about 25% slower.
-#[cfg(feature = "jpeg")]
-const SCORED_AT_ONCE: usize = 8_000_000;
 
 /// A JPEG photo, decoded.
 pub struct Photo {
@@ -59,8 +21,6 @@ pub struct Photo {
     pub pixels: Vec<RGBA>,
     pub width: usize,
     pub height: usize,
-    /// One channel rather than three.
-    pub gray: bool,
     /// Its ICC profile, if it has one.
     pub icc: Option<Vec<u8>>,
     /// Its EXIF orientation (1 if none).
@@ -102,113 +62,11 @@ pub(crate) fn decode_limited(bytes: &[u8], max_pixels: usize) -> Result<Photo, E
     } else {
         samples.as_chunks::<3>().0.iter().map(|p| RGBA::new(p[0], p[1], p[2], 255)).collect()
     };
-    Ok(Photo { pixels, width, height, gray, icc, orientation })
+    Ok(Photo { pixels, width, height, icc, orientation })
 }
 
 fn unreadable(e: zune_jpeg::errors::DecodeErrors) -> Error {
     format!("not a JPEG pngdeer can read: {}", e.to_string().trim()).into()
-}
-
-/// A compressed JPEG and what the search found.
-#[cfg(feature = "jpeg")]
-pub struct CompressedJpeg {
-    pub jpeg: Vec<u8>,
-    /// The target searched for (Settings::target, or the automatic one).
-    pub target: f64,
-    /// The quality the file was encoded at; None if the input itself came back.
-    pub quality: Option<u32>,
-    /// Its score against the input as decoded (100 for the input itself).
-    pub score: f64,
-    pub tries: usize,
-    pub rounds: usize,
-    /// "hit", "miss" (no quality reaches the target; the closest), or "original" (nothing smaller
-    /// than the input reaches it, so the input).
-    pub outcome: &'static str,
-    /// Milliseconds: decoding and scoring the input, and the search (zero without Settings::clock).
-    pub ms: (f64, f64),
-}
-
-#[cfg(feature = "jpeg")]
-impl CompressedJpeg {
-    pub fn json(&self) -> String {
-        let quality = self.quality.map_or("null".into(), |q| q.to_string());
-        format!(
-            r#"{{"format": "jpeg", "target": {:.2}, "quality": {quality}, "score": {:.3}, "tries": {}, "rounds": {}, "outcome": "{}", "ms": {{"decode": {:.0}, "search": {:.0}}}, "bytes": {}}}"#,
-            self.target,
-            self.score,
-            self.tries,
-            self.rounds,
-            self.outcome,
-            self.ms.0,
-            self.ms.1,
-            self.jpeg.len()
-        )
-    }
-}
-
-/// One file the search tried.
-#[cfg(feature = "jpeg")]
-struct Attempt {
-    quality: u32,
-    file: Vec<u8>,
-    score: f64,
-}
-
-#[cfg(feature = "jpeg")]
-impl Tried for Attempt {
-    fn quality(&self) -> u32 {
-        self.quality
-    }
-    fn score(&self) -> f64 {
-        self.score
-    }
-    fn size(&self) -> usize {
-        self.file.len()
-    }
-}
-
-/// Compresses one JPEG file: the lowest quality that reaches the target (see the module docs).
-#[cfg(feature = "jpeg")]
-pub fn compress_jpeg(input: &[u8], settings: &Settings) -> Result<CompressedJpeg, Error> {
-    let tick = || settings.clock.map_or(0.0, |c| c());
-    let t = tick();
-    let photo = decode(input)?;
-    let (w, h) = (photo.width, photo.height);
-    let scorer = Scorer::new(&photo.pixels, w, h)?;
-    let samples: Vec<u8> = if photo.gray { photo.pixels.iter().map(|p| p.r).collect() } else { photo.pixels.iter().flat_map(|p| [p.r, p.g, p.b]).collect() };
-    let components = if photo.gray { 1 } else { 3 };
-    let icc = photo.icc.as_deref().filter(|icc| !is_srgb(icc));
-    let exif = (photo.orientation != 1).then(|| orientation_exif(photo.orientation));
-    // A round's files are encoded and decoded at once (each on one thread), then scored as many at
-    // once as fit in SCORED_AT_ONCE (scoring is parallel itself).
-    let ours = mozjpeg::Options { quality: 75, quant_table: Some(2), full_chroma: false, progressive: true };
-    let attempts = |qualities: &[u32]| -> Result<Vec<Attempt>, Error> {
-        let files = par::map(qualities, |&q| -> Result<_, String> {
-            let file =
-                mozjpeg::encode(&samples, w, h, components, &mozjpeg::Options { quality: q as u8, ..ours }, icc, exif.as_deref()).map_err(|e| e.to_string())?;
-            let pixels = decode(&file).map_err(|e| e.to_string())?.pixels;
-            Ok((q, file, pixels))
-        });
-        let files = files.into_iter().collect::<Result<Vec<_>, _>>()?;
-        let at_once = (SCORED_AT_ONCE / scorer.scored_pixels()).max(1);
-        let scores: Vec<_> = files.chunks(at_once).flat_map(|some| par::map(some, |(_, _, pixels)| scorer.score(pixels).map_err(|e| e.to_string()))).collect();
-        files.into_iter().zip(scores).map(|((quality, file, _), score)| Ok(Attempt { quality, file, score: score? })).collect()
-    };
-    let target = match settings.target {
-        Some(target) => target,
-        None => auto_target(w, h),
-    };
-    let decode_ms = tick() - t;
-    let t = tick();
-    let found = quality::search(target, input.len(), FIRST_QUALITY, SLOPE, Vec::new(), attempts)?;
-    let ms = (decode_ms, tick() - t);
-    let (tries, rounds) = (found.tries, found.rounds);
-    let compressed = |a: Attempt, outcome| CompressedJpeg { quality: Some(a.quality), score: a.score, jpeg: a.file, target, tries, rounds, outcome, ms };
-    Ok(match (found.best, found.closest) {
-        (Some(best), _) if best.file.len() < input.len() => compressed(best, "hit"),
-        (None, Some(closest)) if closest.file.len() < input.len() => compressed(closest, "miss"),
-        _ => CompressedJpeg { jpeg: input.to_vec(), target, quality: None, score: 100.0, tries, rounds, outcome: "original", ms },
-    })
 }
 
 /// The orientation tag (0x0112) in IFD0 of EXIF data starting at its TIFF header.
@@ -230,7 +88,7 @@ fn exif_orientation(tiff: &[u8]) -> Option<u16> {
 }
 
 /// An EXIF APP1 payload holding only an orientation.
-#[cfg(any(feature = "jpeg", test))]
+#[cfg(test)]
 fn orientation_exif(orientation: u16) -> Vec<u8> {
     let mut exif = b"Exif\0\0MM\0\x2a\0\0\0\x08".to_vec(); // big-endian TIFF, IFD0 right after
     exif.extend_from_slice(&1u16.to_be_bytes()); // one entry:
@@ -241,7 +99,7 @@ fn orientation_exif(orientation: u16) -> Vec<u8> {
 }
 
 /// The automatic target for a photo of `w` × `h` pixels (see the module docs).
-#[cfg(any(feature = "jpeg", feature = "webp"))]
+#[cfg(feature = "webp")]
 pub(crate) fn auto_target(w: usize, h: usize) -> f64 {
     // libm: the same bits on every target
     (AUTO_AT_1MP - AUTO_SLOPE * libm::log((w * h) as f64 / 1e6)).min(AUTO_CAP)
@@ -251,7 +109,7 @@ pub use crate::codec::oriented;
 
 /// Whether an ICC profile is sRGB's: its description says so (the profile cameras, editors and
 /// Wikimedia embed: "sRGB IEC61966-2.1" and the like). Viewers show an untagged JPEG as sRGB.
-#[cfg(any(feature = "jpeg", feature = "webp"))]
+#[cfg(feature = "webp")]
 pub(crate) fn is_srgb(icc: &[u8]) -> bool {
     let u32_at = |at: usize| icc.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()));
     let Some(count) = u32_at(128) else { return false };
@@ -304,6 +162,7 @@ mod tests {
         assert_eq!(shown(8), (vec![3, 6, 2, 5, 1, 4], 2, 3));
     }
 
+    #[cfg(feature = "webp")]
     #[test]
     fn tells_srgb_profiles() {
         let profile = |desc: &[u8]| {

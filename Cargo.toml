@@ -3,15 +3,15 @@ name = "pngdeer"
 version = "0.2.1"
 edition = "2021"
 license = "MIT"
-description = "Lossy PNG compression: per image, the smallest palette PNG that keeps a SSIMULACRA2 quality. The same code runs on the command line and in the browser (web/)."
+description = "Native PNG and WebP compression with quality and fast presets"
 readme = "README.md"
 repository = "https://github.com/heydeer/pngdeer"
-# The library, the command line and their tests; not bench/'s images, web/ or the other tools.
+# Native library and CLI sources.
 include = ["/src", "/tests", "/README.md", "/LICENSE"]
 
 [features]
-default = ["parallel", "oxipng", "webp", "jpeg"]
-# Threads for palettes, remapping, scoring and oxipng (web/'s threaded build turns it on too).
+default = ["parallel", "oxipng", "webp", "jpeg-decode"]
+# Threads for palettes, remapping, scoring and oxipng.
 # Results don't depend on the number of threads.
 parallel = ["dep:rayon", "fast-ssim2/rayon", "oxipng?/parallel"]
 # compress() recompresses its final file with oxipng -o 2.
@@ -20,11 +20,6 @@ oxipng = ["dep:oxipng"]
 webp = ["dep:libwebp"]
 # JPEG input, independently of the native JPEG encoder.
 jpeg-decode = ["dep:zune-jpeg", "dep:zune-core"]
-# JPEG output (pngdeer::compress_jpeg): the vendored mozjpeg (vendor/mozjpeg) encodes.
-jpeg = ["jpeg-decode", "dep:mozjpeg"]
-# For wasm32: oxipng's libdeflate built without libc (needs a clang that targets wasm32, see web/build.sh).
-freestanding = ["oxipng?/freestanding"]
-
 [dependencies]
 crc32fast = "1.5.3"
 fast-ssim2 = "0.9.0"
@@ -33,7 +28,6 @@ fast-ssim2 = "0.9.0"
 libm = "0.2.16"
 libwebp = { package = "pngdeer-libwebp", path = "vendor/libwebp", optional = true }
 miniz_oxide = "0.9.1"
-mozjpeg = { package = "pngdeer-mozjpeg", path = "vendor/mozjpeg", optional = true }
 oxipng = { version = "10.2.1", default-features = false, optional = true }
 png = "0.18.1"
 rayon = { version = "1", optional = true }
@@ -43,7 +37,7 @@ zune-core = { version = "0.5", optional = true }
 zune-jpeg = { version = "0.5.15", default-features = false, features = ["std"], optional = true }
 
 [workspace]
-members = [".", "web/wasm", "tools/quantlab", "tools/webplab", "vendor/mozjpeg"]
+members = ["."]
 default-members = ["."]
 resolver = "2"
 

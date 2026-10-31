@@ -1,40 +1,4 @@
-//! pngdeer on the command line, writing the same file as the browser build (web/):
-//!
-//!   pngdeer IN.png -o OUT.png [--format png|webp] [--target auto|T] [--preview-pixels N] [--variants SPEC]
-//!
-//! Writes the smallest palette PNG that keeps IN's quality as SSIMULACRA2 measures it: a score
-//! chosen per image (auto, the default; see search.rs), or at least T. Prints a JSON report: the
-//! target, palette size and variant, score, evaluations, time per stage, outcome and bytes. An
-//! animated PNG stays animated, every frame at least T on one palette (the report adds "frames",
-//! and its score is the worst frame's).
-//!
-//! A JPEG IN comes out as a JPEG: re-encoded at the lowest quality that keeps T, never bigger than
-//! IN (pngdeer::jpeg). Automatic quality there is about TinyPNG's JPEG's, which goes by the photo's
-//! size (see jpeg.rs). Its report gives the quality, score and searches; the ICC profile (unless
-//! sRGB's) and the EXIF orientation stay, the rest of EXIF goes. With --format webp (or an OUT
-//! ending in .webp) it comes out as lossy WebP instead, turned as its orientation says (webp.rs).
-//!
-//! --format webp (also chosen by an OUT ending in .webp): the smaller of a palette image as lossless
-//!   WebP and the lossiest WebP that keeps the target. Automatic quality there is TinyPNG's WebP's:
-//!   the PNG's where the palette wins, else lossy quality 70's score (see webp.rs). Its report names
-//!   the winner, its quality and score, both candidates' sizes, and has the PNG's report.
-//! --webp-method N, --webp-sharp-yuv 0|1, --webp-alpha-filter N, --webp-autofilter 0|1,
-//!   --webp-large-alpha-effort N: the lossy candidates' settings;
-//!   --webp-lossless-level N: also a slower lossless level where lossless may win;
-//!   --webp-reference Q|none: automatic quality's reference lossy quality (see webp.rs)
-//!   (pngdeer::WebpOptions, for experiments).
-//!
-//! --preview-pixels N: images over N pixels are searched on a downscaled preview, then checked at
-//!   full size (default pngdeer::PREVIEW_PIXELS, as in the browser). 0 searches at full size: about
-//!   1% smaller files, several times slower on large images.
-//! --variants SPEC: the remapping variants tried at each palette size, e.g. 50,0,0r2,w0 (the
-//!   default; see search::parse_variants).
-//!
-//! Two helpers for bench/bench.py:
-//!   pngdeer IN.png --score OTHER            SSIMULACRA2 of OTHER (PNG, WebP or JPEG) against IN, as the
-//!                                           search scores; for an animated IN, the worst frame's,
-//!                                           each against the frame OTHER shows at that time
-//!   pngdeer IN.png -o OUT.png --upscale K   nearest-neighbour K× enlargement, written as RGBA
+//! Native PNG/JPEG compression CLI with quality and fast presets.
 
 use std::{
     env, fs,
@@ -47,7 +11,7 @@ use std::{
 use pngdeer::{codec, search};
 
 const USAGE: &str = "usage: pngdeer IN.png -o OUT.png [--preset quality|fast] [--format png|webp] [--target auto|T] [--preview-pixels N] [--variants SPEC]
-       pngdeer IN.jpg -o OUT.jpg|OUT.webp [--target auto|T]
+       pngdeer IN.jpg -o OUT.webp [--target auto|T]
        pngdeer IN.png --score OTHER
        pngdeer IN.png -o OUT.png --upscale K
        pngdeer - -o - --preset fast [--format webp]    (binary stdin/stdout, report on stderr)";
@@ -159,14 +123,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return match format.as_deref() {
             Some("webp") => write_webp(&input, &output, &settings),
             None if output.to_lowercase().ends_with(".webp") => write_webp(&input, &output, &settings),
-            Some("jpeg") | None => write_jpeg(&input, &output, &settings),
-            Some(other) => Err(format!("a JPEG compresses to jpeg or webp, not {other}").into()),
+            Some("jpeg") | None => Err("JPEG output is disabled; use --format webp to convert JPEG input".into()),
+            Some(other) => Err(format!("a JPEG converts to webp, not {other}").into()),
         };
     }
     let webp = match format.as_deref() {
         Some("webp") => true,
         Some("png") => false,
-        Some(other) => return Err(format!("unknown --format: {other} (png or webp; jpeg for a JPEG)").into()),
+        Some(other) => return Err(format!("unknown --format: {other} (png or webp)").into()),
         None => output.to_lowercase().ends_with(".webp"),
     };
     if webp {
@@ -230,19 +194,6 @@ fn is_jpeg(input: &[u8]) -> bool {
 #[cfg(not(feature = "jpeg-decode"))]
 fn is_jpeg(_: &[u8]) -> bool {
     false
-}
-
-#[cfg(feature = "jpeg")]
-fn write_jpeg(input: &[u8], output: &str, settings: &pngdeer::Settings) -> Result<(), Box<dyn std::error::Error>> {
-    let result = pngdeer::compress_jpeg(input, settings)?;
-    write_output(output, &result.jpeg)?;
-    report(output, &result.json());
-    Ok(())
-}
-
-#[cfg(not(feature = "jpeg"))]
-fn write_jpeg(_: &[u8], _: &str, _: &pngdeer::Settings) -> Result<(), Box<dyn std::error::Error>> {
-    Err("JPEG output is disabled in this build; use --format webp to convert JPEG input".into())
 }
 
 /// SSIMULACRA2 of each frame of animation `a` against the frame animation `b` shows at the same

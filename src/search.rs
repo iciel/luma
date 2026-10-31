@@ -71,7 +71,7 @@ const PREVIEW_MARGIN: f64 = 2.0;
 pub(crate) const AUTO_CAP: f64 = 90.0;
 /// Above this many scored pixels the reference keeps only the source between checks (fast-ssim2's
 /// lean reference): about half the memory at the peak, slower checks, the same scores. It is what
-/// lets wasm32's 4 GB hold images of 40 MP (web/worker.js).
+/// limits peak memory when scoring large images.
 const LEAN_PIXELS: usize = 8_000_000;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

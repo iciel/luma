@@ -1,17 +1,4 @@
-//! pngdeer: lossy PNG compression that finds, per image, the smallest palette PNG keeping a
-//! SSIMULACRA2 quality. The same code runs the command-line tool (src/main.rs) and the browser build
-//! (web/wasm), and both write the same bytes for the same input.
-//!
-//! - color: sRGB, Oklab, and colors as seen over a dark and a light background
-//! - palette: palettes (weighted median cut, k-means, error feedback)
-//! - remap: pixels onto a palette (Floyd–Steinberg), neighbour smoothing
-//! - search: the palette size and remapping that reach the target in the fewest bytes
-//! - codec: PNG decoding, a quick palette PNG writer, and oxipng for the final file
-//! - apng: animated PNGs, frames as shown and a palette animation written back
-//! - webp: WebP output, the smaller of a palette image losslessly and a lossy file of the same
-//!   quality (a JPEG photo: the lossy file)
-//! - jpeg: JPEG photos re-encoded at the lowest quality that keeps the target
-//! - compress (here): the whole pipeline for one file
+//! Native PNG and WebP compression with quality search and fast single-candidate presets.
 
 // Index loops over a color's few coordinates read better here than zipped iterators.
 #![allow(clippy::needless_range_loop)]
@@ -24,7 +11,7 @@ mod fast;
 pub mod jpeg;
 mod palette;
 mod par;
-#[cfg(any(feature = "webp", feature = "jpeg"))]
+#[cfg(feature = "webp")]
 mod quality;
 mod remap;
 pub mod search;
@@ -33,8 +20,6 @@ pub mod webp;
 
 use codec::Error;
 pub use fast::{compress_fast, FastCompressed};
-#[cfg(feature = "jpeg")]
-pub use jpeg::{compress_jpeg, CompressedJpeg};
 use search::{Report, Variant, DEFAULT_VARIANTS};
 #[cfg(feature = "webp")]
 pub use webp::{compress_webp, compress_webp_fast, CompressedWebp, FastWebp};
@@ -42,7 +27,7 @@ pub use webp::{compress_webp, compress_webp_fast, CompressedWebp, FastWebp};
 /// An 8-bit RGBA pixel (the `rgb` crate's).
 pub use rgb::RGBA8 as RGBA;
 
-/// The default preview size, for the browser and the command line alike: 5 MP screenshots in
+/// The default quality-search preview size: 5 MP screenshots in
 /// seconds, for files about 1% bigger than a full-size search's.
 pub const PREVIEW_PIXELS: usize = 350_000;
 /// An image of at most 256 colors is kept lossless when that costs at most this much more than

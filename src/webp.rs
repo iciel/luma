@@ -1,29 +1,5 @@
-//! WebP output: per image, the smaller of two WebP files that keep a quality target.
-//!
-//! The target is `--target`'s, or automatically TinyPNG's WebP quality for the image (round 3 of
-//! experiments/webp/FINDINGS.md). TinyPNG's WebP is its palette PNG stored losslessly, or where that
-//! is bigger, libwebp at about quality 70: so pngdeer's PNG (whose automatic target is TinyPNG's PNG
-//! quality) is compared with a lossy file at quality 70 (WebpOptions::reference_quality, libwebp's
-//! default settings), and where that is smaller, its score becomes the target (at most 90, as for
-//! PNG) and the PNG search runs again for it where its palette might win (PALETTE_REACH).
-//!
-//! - Lossless: the PNG's own pixels (the palette image, or the source where the PNG kept it) as
-//!   lossless WebP. Same pixels, same score; libwebp's palette coding beats oxipng's PNG by 2–31%.
-//! - Lossy: the lowest libwebp quality (0–100) whose file scores at least the target, as the
-//!   search scores, at libwebp's slowest method with sharp YUV and its auto filter (round 4), or
-//!   the quality-70 file where that is smaller. It wins big on photos, cut-outs, 3D renders and 2×
-//!   screenshots, and loses on flat icons and 1× UI, where it can need more than twice the bytes or
-//!   never get there.
-//!
-//! Colors: WebP carries color information only as an ICC profile. An iCCP chunk becomes the file's
-//! ICCP, an image in sRGB needs none, and the rest (cICP, or gAMA and cHRM that aren't sRGB's) is
-//! refused rather than shown in the wrong colors. Animated PNGs are refused too.
-//!
-//! A JPEG photo (with the jpeg feature) has only the lossy candidate: its pixels don't fit a
-//! palette. It is decoded as for JPEG output (jpeg.rs) and turned as its EXIF orientation says,
-//! since browsers don't turn a WebP file; its ICC profile is kept unless it is sRGB's, the rest of
-//! its metadata dropped. Automatic quality is JPEG output's (jpeg::auto_target). The file is WebP
-//! even where it is bigger than the JPEG, since WebP is what was asked for.
+//! WebP output: quality searches lossless/lossy candidates; fast encodes the source once.
+//! JPEG input is decoded and oriented before conversion; necessary ICC profiles are retained.
 
 use rgb::{ComponentBytes, FromSlice};
 
