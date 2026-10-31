@@ -18,8 +18,10 @@ parallel = ["dep:rayon", "fast-ssim2/rayon", "oxipng?/parallel"]
 oxipng = ["dep:oxipng"]
 # WebP output (pngdeer::compress_webp), with the vendored libwebp (vendor/libwebp).
 webp = ["dep:libwebp"]
-# JPEG output (pngdeer::compress_jpeg): the vendored mozjpeg (vendor/mozjpeg) encodes, zune-jpeg decodes.
-jpeg = ["dep:mozjpeg", "dep:zune-jpeg", "dep:zune-core"]
+# JPEG input, independently of the native JPEG encoder.
+jpeg-decode = ["dep:zune-jpeg", "dep:zune-core"]
+# JPEG output (pngdeer::compress_jpeg): the vendored mozjpeg (vendor/mozjpeg) encodes.
+jpeg = ["jpeg-decode", "dep:mozjpeg"]
 # For wasm32: oxipng's libdeflate built without libc (needs a clang that targets wasm32, see web/build.sh).
 freestanding = ["oxipng?/freestanding"]
 

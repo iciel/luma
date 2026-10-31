@@ -206,12 +206,12 @@ fn write_webp(_: &[u8], _: &str, _: &pngdeer::Settings) -> Result<(), Box<dyn st
     Err("this pngdeer was built without the webp feature".into())
 }
 
-#[cfg(feature = "jpeg")]
+#[cfg(feature = "jpeg-decode")]
 fn is_jpeg(input: &[u8]) -> bool {
     pngdeer::jpeg::is_jpeg(input)
 }
 
-#[cfg(not(feature = "jpeg"))]
+#[cfg(not(feature = "jpeg-decode"))]
 fn is_jpeg(_: &[u8]) -> bool {
     false
 }
@@ -226,7 +226,7 @@ fn write_jpeg(input: &[u8], output: &str, settings: &pngdeer::Settings) -> Resul
 
 #[cfg(not(feature = "jpeg"))]
 fn write_jpeg(_: &[u8], _: &str, _: &pngdeer::Settings) -> Result<(), Box<dyn std::error::Error>> {
-    Err("this pngdeer was built without the jpeg feature".into())
+    Err("JPEG output is disabled in this build; use --format webp to convert JPEG input".into())
 }
 
 /// SSIMULACRA2 of each frame of animation `a` against the frame animation `b` shows at the same
@@ -254,10 +254,10 @@ fn frame_scores(a: &[u8], b: &[u8]) -> Result<Vec<f64>, Box<dyn std::error::Erro
         .collect()
 }
 
-/// A PNG, a WebP file with the webp feature, or a JPEG with the jpeg feature (turned as its EXIF
+/// A PNG, a WebP file with the webp feature, or a JPEG with the jpeg-decode feature (turned as its EXIF
 /// orientation says, as viewers show it), as RGBA.
 fn decode_any(bytes: &[u8]) -> Result<codec::Bitmap, Box<dyn std::error::Error>> {
-    #[cfg(feature = "jpeg")]
+    #[cfg(feature = "jpeg-decode")]
     if pngdeer::jpeg::is_jpeg(bytes) {
         let photo = pngdeer::jpeg::decode(bytes)?;
         let (pixels, width, height) = pngdeer::jpeg::oriented(photo.pixels, photo.width, photo.height, photo.orientation);

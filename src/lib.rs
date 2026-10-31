@@ -20,7 +20,7 @@ pub mod apng;
 pub mod codec;
 mod color;
 mod fast;
-#[cfg(feature = "jpeg")]
+#[cfg(feature = "jpeg-decode")]
 pub mod jpeg;
 mod palette;
 mod par;

@@ -1,5 +1,5 @@
-//! JPEG output (`compress_jpeg`): a JPEG photo re-encoded at the lowest quality whose SSIMULACRA2
-//! score, against the photo as it decodes, reaches the target.
+//! JPEG input (`jpeg-decode` feature) and optional output (`jpeg` feature): `compress_jpeg`
+//! re-encodes a photo at the lowest quality whose SSIMULACRA2 score reaches the target.
 //!
 //! - Decoding: zune-jpeg without its SIMD code, so the pixels, and so the scores and the file, are
 //!   the same on every target, the browser build's too. Its errors come back as errors (libjpeg's
@@ -23,22 +23,34 @@ use zune_core::options::DecoderOptions;
 use zune_jpeg::JpegDecoder;
 
 use crate::codec::Error;
+#[cfg(feature = "jpeg")]
 use crate::par;
+#[cfg(feature = "jpeg")]
 use crate::quality::{self, Tried};
-use crate::search::{Scorer, AUTO_CAP};
-use crate::{Settings, RGBA};
+#[cfg(feature = "jpeg")]
+use crate::search::Scorer;
+#[cfg(any(feature = "jpeg", feature = "webp"))]
+use crate::search::AUTO_CAP;
+#[cfg(feature = "jpeg")]
+use crate::Settings;
+use crate::RGBA;
 
 /// The automatic target at one megapixel, and how much lower it is per natural-log step in size:
 /// 74.5 at 0.5 MP, 70.1 at 2 MP, 64.4 at 12 MP.
+#[cfg(any(feature = "jpeg", feature = "webp"))]
 const AUTO_AT_1MP: f64 = 72.3;
+#[cfg(any(feature = "jpeg", feature = "webp"))]
 const AUTO_SLOPE: f64 = 3.2;
 /// Where the search aims first: the median quality automatic targets took on the 60 photos.
+#[cfg(feature = "jpeg")]
 const FIRST_QUALITY: f64 = 64.0;
 /// About how many points a file's score gains per quality step there.
+#[cfg(feature = "jpeg")]
 const SLOPE: f64 = 0.6;
 /// A round's files are scored at once while their scored pixels fit in this, one after another
 /// beyond it: each scoring at once adds about 64 bytes a pixel at the peak (a 12 MP photo peaked at
 /// 2.7 GB scoring three at once, 1.3 GB one at a time), and one at a time is about 25% slower.
+#[cfg(feature = "jpeg")]
 const SCORED_AT_ONCE: usize = 8_000_000;
 
 /// A JPEG photo, decoded.
@@ -61,7 +73,8 @@ pub fn is_jpeg(bytes: &[u8]) -> bool {
 }
 
 pub fn decode(bytes: &[u8]) -> Result<Photo, Error> {
-    let options = DecoderOptions::default().set_max_width(mozjpeg::MAX_SIDE).set_max_height(mozjpeg::MAX_SIDE);
+    // Retain the existing dimension limit without depending on the optional encoder.
+    let options = DecoderOptions::default().set_max_width(65_500).set_max_height(65_500);
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
     decoder.decode_headers().map_err(unreadable)?;
     let gray = match decoder.input_colorspace() {
@@ -89,6 +102,7 @@ fn unreadable(e: zune_jpeg::errors::DecodeErrors) -> Error {
 }
 
 /// A compressed JPEG and what the search found.
+#[cfg(feature = "jpeg")]
 pub struct CompressedJpeg {
     pub jpeg: Vec<u8>,
     /// The target searched for (Settings::target, or the automatic one).
@@ -106,6 +120,7 @@ pub struct CompressedJpeg {
     pub ms: (f64, f64),
 }
 
+#[cfg(feature = "jpeg")]
 impl CompressedJpeg {
     pub fn json(&self) -> String {
         let quality = self.quality.map_or("null".into(), |q| q.to_string());
@@ -124,12 +139,14 @@ impl CompressedJpeg {
 }
 
 /// One file the search tried.
+#[cfg(feature = "jpeg")]
 struct Attempt {
     quality: u32,
     file: Vec<u8>,
     score: f64,
 }
 
+#[cfg(feature = "jpeg")]
 impl Tried for Attempt {
     fn quality(&self) -> u32 {
         self.quality
@@ -143,6 +160,7 @@ impl Tried for Attempt {
 }
 
 /// Compresses one JPEG file: the lowest quality that reaches the target (see the module docs).
+#[cfg(feature = "jpeg")]
 pub fn compress_jpeg(input: &[u8], settings: &Settings) -> Result<CompressedJpeg, Error> {
     let tick = || settings.clock.map_or(0.0, |c| c());
     let t = tick();
@@ -204,6 +222,7 @@ fn exif_orientation(tiff: &[u8]) -> Option<u16> {
 }
 
 /// An EXIF APP1 payload holding only an orientation.
+#[cfg(any(feature = "jpeg", test))]
 fn orientation_exif(orientation: u16) -> Vec<u8> {
     let mut exif = b"Exif\0\0MM\0\x2a\0\0\0\x08".to_vec(); // big-endian TIFF, IFD0 right after
     exif.extend_from_slice(&1u16.to_be_bytes()); // one entry:
@@ -214,6 +233,7 @@ fn orientation_exif(orientation: u16) -> Vec<u8> {
 }
 
 /// The automatic target for a photo of `w` × `h` pixels (see the module docs).
+#[cfg(any(feature = "jpeg", feature = "webp"))]
 pub(crate) fn auto_target(w: usize, h: usize) -> f64 {
     // libm: the same bits on every target
     (AUTO_AT_1MP - AUTO_SLOPE * libm::log((w * h) as f64 / 1e6)).min(AUTO_CAP)
@@ -248,6 +268,7 @@ pub fn oriented(pixels: Vec<RGBA>, w: usize, h: usize, orientation: u16) -> (Vec
 
 /// Whether an ICC profile is sRGB's: its description says so (the profile cameras, editors and
 /// Wikimedia embed: "sRGB IEC61966-2.1" and the like). Viewers show an untagged JPEG as sRGB.
+#[cfg(any(feature = "jpeg", feature = "webp"))]
 pub(crate) fn is_srgb(icc: &[u8]) -> bool {
     let u32_at = |at: usize| icc.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()));
     let Some(count) = u32_at(128) else { return false };

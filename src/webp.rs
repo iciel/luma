@@ -37,7 +37,7 @@ use crate::{Compressed, Settings, WebpOptions, RGBA};
 /// from TinyPNG's PNG quality mostly land between 80 and 95.
 const FIRST_QUALITY: f64 = 90.0;
 /// The same for a JPEG photo at its automatic target.
-#[cfg(feature = "jpeg")]
+#[cfg(feature = "jpeg-decode")]
 const FIRST_PHOTO_QUALITY: f64 = 70.0;
 /// About how many points a lossy file's score gains per quality step there, to aim from the one
 /// side of the target known so far.
@@ -124,9 +124,9 @@ impl CompressedWebp {
 
 /// Compresses one PNG file to WebP: `compress` first, for a target and its pixels (twice where the
 /// automatic target moves, see the module), then the lossless and lossy candidates; the smaller one
-/// that reaches the target wins. A JPEG (with the jpeg feature) becomes lossy WebP (`photo_webp`).
+/// that reaches the target wins. A JPEG (with the jpeg-decode feature) becomes lossy WebP (`photo_webp`).
 pub fn compress_webp(input: &[u8], settings: &Settings) -> Result<CompressedWebp, Error> {
-    #[cfg(feature = "jpeg")]
+    #[cfg(feature = "jpeg-decode")]
     if crate::jpeg::is_jpeg(input) {
         return photo_webp(input, settings);
     }
@@ -235,7 +235,7 @@ pub fn compress_webp(input: &[u8], settings: &Settings) -> Result<CompressedWebp
 
 /// A JPEG photo as lossy WebP: the lowest quality whose file, as shown, scores at least the target
 /// against the photo as shown (see the module).
-#[cfg(feature = "jpeg")]
+#[cfg(feature = "jpeg-decode")]
 fn photo_webp(input: &[u8], settings: &Settings) -> Result<CompressedWebp, Error> {
     let tick = || settings.clock.map_or(0.0, |c| c());
     let options = settings.webp;
