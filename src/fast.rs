@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::{codec, palette, remap};
 
-const MAX_PIXELS: usize = 8_000_000;
+pub(crate) const MAX_PIXELS: usize = 8_000_000;
 
 pub struct FastCompressed {
     pub png: Vec<u8>,
@@ -81,7 +81,7 @@ pub fn compress_fast(input: &[u8]) -> Result<FastCompressed, codec::Error> {
 }
 
 /// Validate chunk framing and CRCs before reading headers or retaining encoded data.
-fn checked_chunks(input: &[u8]) -> Result<Vec<(&[u8], &[u8])>, codec::Error> {
+pub(crate) fn checked_chunks(input: &[u8]) -> Result<Vec<(&[u8], &[u8])>, codec::Error> {
     if !input.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("invalid PNG signature".into());
     }
@@ -111,7 +111,7 @@ fn checked_chunks(input: &[u8]) -> Result<Vec<(&[u8], &[u8])>, codec::Error> {
     Err("incomplete PNG".into())
 }
 
-fn exif_orientation(exif: &[u8]) -> Result<Option<u16>, codec::Error> {
+pub(crate) fn exif_orientation(exif: &[u8]) -> Result<Option<u16>, codec::Error> {
     if exif.len() < 8 {
         return Err("truncated EXIF".into());
     }

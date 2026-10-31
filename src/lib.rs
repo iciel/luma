@@ -37,7 +37,7 @@ pub use fast::{compress_fast, FastCompressed};
 pub use jpeg::{compress_jpeg, CompressedJpeg};
 use search::{Report, Variant, DEFAULT_VARIANTS};
 #[cfg(feature = "webp")]
-pub use webp::{compress_webp, CompressedWebp};
+pub use webp::{compress_webp, compress_webp_fast, CompressedWebp, FastWebp};
 
 /// An 8-bit RGBA pixel (the `rgb` crate's).
 pub use rgb::RGBA8 as RGBA;

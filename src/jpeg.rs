@@ -73,10 +73,18 @@ pub fn is_jpeg(bytes: &[u8]) -> bool {
 }
 
 pub fn decode(bytes: &[u8]) -> Result<Photo, Error> {
+    decode_limited(bytes, usize::MAX)
+}
+
+pub(crate) fn decode_limited(bytes: &[u8], max_pixels: usize) -> Result<Photo, Error> {
     // Retain the existing dimension limit without depending on the optional encoder.
     let options = DecoderOptions::default().set_max_width(65_500).set_max_height(65_500);
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
     decoder.decode_headers().map_err(unreadable)?;
+    let (width, height) = decoder.dimensions().ok_or("not a JPEG pngdeer can read")?;
+    if width.checked_mul(height).is_none_or(|pixels| pixels > max_pixels) {
+        return Err("JPEG exceeds the pixel limit".into());
+    }
     let gray = match decoder.input_colorspace() {
         Some(ColorSpace::Luma) => true,
         Some(ColorSpace::YCbCr | ColorSpace::RGB) => false,
@@ -239,32 +247,7 @@ pub(crate) fn auto_target(w: usize, h: usize) -> f64 {
     (AUTO_AT_1MP - AUTO_SLOPE * libm::log((w * h) as f64 / 1e6)).min(AUTO_CAP)
 }
 
-/// A photo's pixels as viewers show them: turned and flipped as its EXIF orientation says (1-8),
-/// with the width and height that come out.
-pub fn oriented(pixels: Vec<RGBA>, w: usize, h: usize, orientation: u16) -> (Vec<RGBA>, usize, usize) {
-    // the stored pixel each shown one comes from; 5-8 swap the sides
-    let from = |x: usize, y: usize| match orientation {
-        2 => (w - 1 - x, y),
-        3 => (w - 1 - x, h - 1 - y),
-        4 => (x, h - 1 - y),
-        5 => (y, x),
-        6 => (y, h - 1 - x),
-        7 => (w - 1 - y, h - 1 - x),
-        8 => (w - 1 - y, x),
-        _ => (x, y),
-    };
-    if !(2..=8).contains(&orientation) {
-        return (pixels, w, h);
-    }
-    let (sw, sh) = if orientation >= 5 { (h, w) } else { (w, h) };
-    let shown = (0..sw * sh)
-        .map(|i| {
-            let (x, y) = from(i % sw, i / sw);
-            pixels[y * w + x]
-        })
-        .collect();
-    (shown, sw, sh)
-}
+pub use crate::codec::oriented;
 
 /// Whether an ICC profile is sRGB's: its description says so (the profile cameras, editors and
 /// Wikimedia embed: "sRGB IEC61966-2.1" and the like). Viewers show an untagged JPEG as sRGB.

@@ -18,6 +18,33 @@ pub struct Bitmap {
     pub height: usize,
 }
 
+/// A photo's pixels as viewers show them: turned and flipped as its EXIF orientation says (1-8),
+/// with the width and height that come out.
+pub fn oriented(pixels: Vec<RGBA>, w: usize, h: usize, orientation: u16) -> (Vec<RGBA>, usize, usize) {
+    // the stored pixel each shown one comes from; 5-8 swap the sides
+    let from = |x: usize, y: usize| match orientation {
+        2 => (w - 1 - x, y),
+        3 => (w - 1 - x, h - 1 - y),
+        4 => (x, h - 1 - y),
+        5 => (y, x),
+        6 => (y, h - 1 - x),
+        7 => (w - 1 - y, h - 1 - x),
+        8 => (w - 1 - y, x),
+        _ => (x, y),
+    };
+    if !(2..=8).contains(&orientation) {
+        return (pixels, w, h);
+    }
+    let (sw, sh) = if orientation >= 5 { (h, w) } else { (w, h) };
+    let shown = (0..sw * sh)
+        .map(|i| {
+            let (x, y) = from(i % sw, i / sw);
+            pixels[y * w + x]
+        })
+        .collect();
+    (shown, sw, sh)
+}
+
 /// Any PNG as 8-bit RGBA. Color-space chunks (gAMA, iCCP, ...) are ignored, as the benchmark does:
 /// the pixel values are scored as they are, and `compress` gives its output the same chunks.
 pub fn decode(bytes: &[u8]) -> Result<Bitmap, Error> {

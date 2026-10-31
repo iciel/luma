@@ -33,6 +33,72 @@ use crate::quality::{self, Found, Tried};
 use crate::search::{Scorer, AUTO_CAP};
 use crate::{Compressed, Settings, WebpOptions, RGBA};
 
+/// A single lossy encode of the source pixels, without a perceptual quality search.
+pub struct FastWebp {
+    pub webp: Vec<u8>,
+    pub elapsed_ms: u128,
+}
+
+impl FastWebp {
+    pub fn json(&self) -> String {
+        format!(r#"{{"format":"webp","preset":"fast","quality":80,"method":3,"score":null,"bytes":{},"elapsed_ms":{}}}"#, self.webp.len(), self.elapsed_ms)
+    }
+}
+
+/// Encode one WebP candidate at quality 80, method 3, with lossless alpha and sharp YUV.
+/// Always returns WebP, even if larger; callers decide whether to keep the original.
+pub fn compress_webp_fast(input: &[u8]) -> Result<FastWebp, Error> {
+    let started = std::time::Instant::now();
+    let (bitmap, icc) = fast_source(input)?;
+    let file = libwebp::encode_lossy(
+        bitmap.pixels.as_bytes(),
+        bitmap.width,
+        bitmap.height,
+        &libwebp::Lossy {
+            quality: 80.0,
+            method: 3,
+            sharp_yuv: true,
+            alpha_quality: 100,
+            alpha_filtering: 1,
+            alpha_compression: true,
+            tuning: Default::default(),
+        },
+    )?;
+    let webp = match icc {
+        Some(icc) => with_icc(&file, &icc, bitmap.width, bitmap.height),
+        None => file,
+    };
+    Ok(FastWebp { webp, elapsed_ms: started.elapsed().as_millis() })
+}
+
+fn fast_source(input: &[u8]) -> Result<(codec::Bitmap, Option<Vec<u8>>), Error> {
+    #[cfg(feature = "jpeg-decode")]
+    if crate::jpeg::is_jpeg(input) {
+        let photo = crate::jpeg::decode_limited(input, crate::fast::MAX_PIXELS)?;
+        let (pixels, width, height) = codec::oriented(photo.pixels, photo.width, photo.height, photo.orientation);
+        return Ok((codec::Bitmap { pixels, width, height }, photo.icc.filter(|icc| !crate::jpeg::is_srgb(icc))));
+    }
+    let chunks = crate::fast::checked_chunks(input)?;
+    if chunks.iter().any(|(kind, _)| *kind == b"acTL") {
+        return Err("animated PNGs can't be written as WebP yet".into());
+    }
+    let width = u32::from_be_bytes(input[16..20].try_into()?);
+    let height = u32::from_be_bytes(input[20..24].try_into()?);
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > crate::fast::MAX_PIXELS as u64 {
+        return Err("fast WebP requires 1 to 8000000 pixels".into());
+    }
+    let mut orientation = 1;
+    for (kind, full) in chunks {
+        if kind == b"eXIf" {
+            orientation = crate::fast::exif_orientation(&full[8..full.len() - 4])?.unwrap_or(1);
+        }
+    }
+    let icc = icc_profile(input)?;
+    let bitmap = codec::decode(input)?;
+    let (pixels, width, height) = codec::oriented(bitmap.pixels, bitmap.width, bitmap.height, orientation);
+    Ok((codec::Bitmap { pixels, width, height }, icc))
+}
+
 /// The first guess at the quality that reaches the target, without a reference to go by: targets
 /// from TinyPNG's PNG quality mostly land between 80 and 95.
 const FIRST_QUALITY: f64 = 90.0;

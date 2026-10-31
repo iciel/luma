@@ -50,7 +50,7 @@ const USAGE: &str = "usage: pngdeer IN.png -o OUT.png [--preset quality|fast] [-
        pngdeer IN.jpg -o OUT.jpg|OUT.webp [--target auto|T]
        pngdeer IN.png --score OTHER
        pngdeer IN.png -o OUT.png --upscale K
-       pngdeer - -o - --preset fast    (binary PNG stdin/stdout, report on stderr)";
+       pngdeer - -o - --preset fast [--format webp]    (binary stdin/stdout, report on stderr)";
 
 fn main() {
     if let Err(e) = run() {
@@ -110,8 +110,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ => input = Some(arg),
         }
     }
-    if preset == "fast" && (search_options || score_against.is_some() || upscale.is_some() || format.as_deref().is_some_and(|f| f != "png")) {
-        return Err("fast preset accepts PNG output only and does not use search, score or upscale options".into());
+    if preset == "fast" && (search_options || score_against.is_some() || upscale.is_some() || format.as_deref().is_some_and(|f| !matches!(f, "png" | "webp"))) {
+        return Err("fast preset accepts PNG or WebP output and does not use search, score, upscale or WebP tuning options".into());
     }
     let input_path = input.ok_or(USAGE)?;
     let input = if input_path == "-" {
@@ -126,6 +126,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     if preset == "fast" {
         let output = output.ok_or(USAGE)?;
+        if format.as_deref() == Some("webp") || (format.is_none() && output.to_lowercase().ends_with(".webp")) {
+            return write_webp_fast(&input, &output);
+        }
         let result = pngdeer::compress_fast(&input)?;
         write_output(&output, &result.png)?;
         report(&output, &result.json());
@@ -191,6 +194,19 @@ fn report(output: &str, json: &str) {
     } else {
         println!("{json}");
     }
+}
+
+#[cfg(feature = "webp")]
+fn write_webp_fast(input: &[u8], output: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let result = pngdeer::compress_webp_fast(input)?;
+    write_output(output, &result.webp)?;
+    report(output, &result.json());
+    Ok(())
+}
+
+#[cfg(not(feature = "webp"))]
+fn write_webp_fast(_: &[u8], _: &str) -> Result<(), Box<dyn std::error::Error>> {
+    Err("this pngdeer was built without the webp feature".into())
 }
 
 #[cfg(feature = "webp")]
