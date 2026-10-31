@@ -23,9 +23,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+          components: clippy, rustfmt
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --locked --package luma --all-targets --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng,webp,jpeg-decode --no-deps -- -D warnings
+      - name: Test
+        run: cargo test --locked --package luma --all-targets --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng,webp,jpeg-decode
       - name: Build image CLI
         run: cargo build --release --locked --package luma --bin luma --target x86_64-pc-windows-msvc --no-default-features --features parallel,oxipng,webp,jpeg-decode
       - name: Package executable and licenses
