@@ -4,7 +4,29 @@ This repository starts from the [heydeer/pngdeer](https://github.com/heydeer/png
 
 The **Windows release** GitHub Actions workflow builds `pngdeer.exe` on `windows-2022` with `parallel,oxipng` enabled and JPEG/WebP disabled. It only builds and packages the executable; it does not run tests, Clippy, benchmarks, or the executable. Download **pngdeer-windows-x64** from the workflow run's **Artifacts** section; the archive contains the executable, licenses, source commit, and SHA-256 checksum. Artifacts are retained for 30 days, and the workflow can be started manually.
 
-This first Windows build preserves the existing file-based CLI (`pngdeer input.png -o output.png`). It does not yet add stdin/stdout image transport or change the compression algorithm.
+The original search preset (`--preset quality`) remains the default. An explicit `--preset fast` selects the fast preset below; both presets support `-` for binary PNG stdin/stdout. Reports go to stderr when the output is `-`, and to stdout for file output.
+
+## Compression presets
+
+```sh
+pngdeer input.png -o output.png --preset quality
+pngdeer input.png -o output.png --preset fast
+pngdeer - -o - --preset fast
+```
+
+The fast preset builds one full-resolution palette of at most 256 colors with the existing plain quantizer (five refinement rounds, no feedback pass), then remaps once with 50% dithering. Images already fitting in 256 colors use an exact palette. It does not search palette sizes, score perceptual quality, or run the final oxipng pass. PNG row-filter encoding still uses the existing writer. Its report includes `score: null`; there is no claim of perceptual or model-recognition equivalence. Search, scoring, upscaling and non-PNG format options are rejected with this preset.
+
+Comments, timestamps, density and unrelated metadata are removed. Color information needed for display is retained using the existing color-chunk handling; EXIF is reduced to non-default orientation only. Pixels are not rotated or resized, and transparency is retained. Invalid EXIF produces an error instead of guessing orientation. The smaller of the candidate and metadata-stripped input is selected; if neither is smaller than the input, the original bytes are returned.
+
+Animated PNGs and images above 8 million pixels are passed through with an explicit outcome, avoiding frame loss and large quantization buffers. Chunk framing and CRCs are checked even on passthrough; regular images are also decoded before processing. Stdin is capped at 64 MiB. There is no built-in wall-clock deadline: the invoking gateway must enforce its own process budget and fall back to the original on failure. Rondo's existing 5-second budget must be adjusted separately before adopting this preset.
+
+After downloading a new Windows artifact, run the executable checks separately from CI:
+
+```sh
+python scripts/verify-fast.py --exe path/to/pngdeer.exe --output dist/fast-check
+```
+
+This checks bundled images, binary stdin/stdout, output dimensions and CRCs, transparency, metadata, Chinese/spaced paths, invalid input, and preserved source files. It records timings and sizes; it does not compile Rust or establish AI recognition accuracy. The script and preset await validation with the new downloaded executable.
 
 **Smaller PNGs. Same picture.** pngdeer is a lossy PNG compressor with no quality slider: for each image it searches palette sizes from 2 to 256 colors, with and without dithering, scores each result with a perceptual metric, and keeps the smallest file that still looks right. At the same quality, the median image comes out **8–12% smaller than with TinyPNG**, the best result of any open-source compressor we've measured.
 
