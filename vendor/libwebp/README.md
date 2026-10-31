@@ -31,7 +31,9 @@ The same way on every target, for the same output everywhere:
    `_AVX2` or `_NEON`, so x86, ARM and WebAssembly all run libwebp's plain C code. (It also leaves out
    threads, which libwebp needs `WEBP_USE_THREAD` for.)
 2. **No fused multiply-add.** `-ffp-contract=off`: clang fuses `a * b + c` on targets with FMA, such
-   as arm64, and a fused result can differ in the last bit.
+   as arm64, and a fused result can differ in the last bit. MSVC uses `/fp:precise` without
+   `/fp:contract` on VS 2022. `/fp:strict` rejects the static `1. / 0.45` initializer in
+   `sharpyuv_gamma.c` with C2099; precise mode permits that constant calculation.
 3. **One libm and one qsort.** `vendor/clib/include/pngdeer_clib.h`, included ahead of every file,
    sends libwebp's inexact math functions (log, log2, log10, exp, pow, logf, expf) to Rust's `libm`
    crate, which gives the same bits on every target, and qsort to a stable sort (`vendor/clib`):

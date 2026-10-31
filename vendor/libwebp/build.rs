@@ -21,7 +21,9 @@ fn main() {
         .warnings(false);
     let header = clib.join("pngdeer_clib.h");
     if build.get_compiler().is_like_msvc() {
-        build.flag("/fp:strict").flag(format!("/FI{}", header.display()));
+        // VS 2022 precise mode leaves contraction off unless /fp:contract is enabled.
+        // Strict mode rejects sharpyuv's static initializer `1. / 0.45` (C2099).
+        build.flag("/fp:precise").flag(format!("/FI{}", header.display()));
     } else {
         // clang fuses a * b + c where the target has FMA (arm64), and a fused result differs
         build.flag("-ffp-contract=off").flag("-include").flag(header.to_str().unwrap());
